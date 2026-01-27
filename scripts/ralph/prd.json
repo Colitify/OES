@@ -11,8 +11,8 @@
         "Guardrail passes or does not regress RMSE_mean"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Baseline RMSE_mean: 3.314"
     },
     {
       "id": "ML-002",

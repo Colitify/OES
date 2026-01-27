@@ -1,0 +1,21 @@
+# Ralph Progress Log
+
+## ML-001 - Expose preprocessing parameters via CLI
+**Status**: PASSED
+**Date**: 2026-01-27
+**RMSE_mean**: 3.314
+
+### Changes Made:
+- Added CLI arguments for all preprocessing parameters in main.py:
+  - --baseline (als, none)
+  - --normalize (snv, minmax, l2, none)
+  - --denoise (savgol, none)
+  - --baseline_lam, --baseline_p (ALS params)
+  - --savgol_window, --savgol_polyorder (Savgol params)
+- Wired CLI args to Preprocessor constructor
+
+### Learnings:
+- The preprocessing pipeline supports: ALS baseline correction, SNV/minmax/L2 normalization, Savitzky-Golay denoising
+- Default parameters: baseline_lam=1e6, baseline_p=0.01, savgol_window=11, savgol_polyorder=3
+- Pipeline uses PCA with 50 components for feature extraction (captures 94.5% variance)
+- metrics.json structure includes primary_metric.value for RMSE_mean guardrail checks
