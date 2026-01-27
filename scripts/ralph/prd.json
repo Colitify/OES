@@ -1,0 +1,30 @@
+
+{
+  "branchName": "ralph/oes-iter",
+  "userStories": [
+    {
+      "id": "ML-001",
+      "title": "Expose preprocessing parameters via CLI",
+      "acceptanceCriteria": [
+        "Can set baseline/normalize/denoise and key params from CLI",
+        "Pipeline runs and produces results/metrics.json",
+        "Guardrail passes or does not regress RMSE_mean"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "ML-002",
+      "title": "Make PCA n_components configurable + include in optimization search",
+      "acceptanceCriteria": [
+        "CLI supports --n_components (or config equivalent)",
+        "Optuna can search n_components in a bounded range",
+        "Best RMSE_mean improves or stays within tolerance"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
