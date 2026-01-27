@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files (large)
+data/
+
+# Output directories
+outputs/
+results/
+
+# Notebooks
+notebooks/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude cache
+.claude/
+
+# Environment
+.env
+*.env
+
+# OS files
+.DS_Store
+Thumbs.db
