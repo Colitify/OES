@@ -84,6 +84,22 @@ def main():
     parser.add_argument("--n_components_min", type=int, default=10, help="Min n_components for optimization search")
     parser.add_argument("--n_components_max", type=int, default=100, help="Max n_components for optimization search")
     parser.add_argument("--optimize_n_components", action="store_true", help="Include n_components in hyperparameter optimization")
+
+    # Feature selection parameters (ML-004)
+    parser.add_argument(
+        "--feature_method", type=str, default="pca",
+        choices=["pca", "wavelength_selection"],
+        help="Feature extraction method (pca or wavelength_selection)"
+    )
+    parser.add_argument(
+        "--selection_method", type=str, default="correlation",
+        choices=["correlation", "variance", "f_score"],
+        help="Wavelength selection method (used when --feature_method=wavelength_selection)"
+    )
+    parser.add_argument("--n_selected_wavelengths", type=int, default=500, help="Number of wavelengths to select (used when --feature_method=wavelength_selection)")
+    parser.add_argument("--n_selected_min", type=int, default=100, help="Min n_selected_wavelengths for optimization search")
+    parser.add_argument("--n_selected_max", type=int, default=1000, help="Max n_selected_wavelengths for optimization search")
+    parser.add_argument("--optimize_features", action="store_true", help="Include feature method (PCA vs wavelength selection) in optimization")
     parser.add_argument("--optimize_preprocess", action="store_true", help="Include preprocessing params in optimization (baseline_lam, baseline_p, savgol_window, savgol_polyorder)")
     parser.add_argument("--two_stage", action="store_true", help="Two-stage optimization: Stage1=preprocessing+PCA, Stage2=model params (recommended)")
     parser.add_argument("--n_trials", type=int, default=20, help="Number of Optuna trials for optimization (default 20)")
@@ -141,9 +157,16 @@ def main():
     if test_data is not None:
         X_test = preprocessor.transform(test_data.spectra)
 
-    # 3. Feature extraction (optional PCA)
+    # 3. Feature extraction (PCA or wavelength selection)
     print("\n[3/5] Feature extraction...")
-    feature_extractor = FeatureExtractor(method="pca", n_components=args.n_components)
+    if args.feature_method == "wavelength_selection":
+        feature_extractor = FeatureExtractor(
+            method="wavelength_selection",
+            n_components=args.n_selected_wavelengths,
+            selection_method=args.selection_method,
+        )
+    else:
+        feature_extractor = FeatureExtractor(method="pca", n_components=args.n_components)
     X_train_feat = feature_extractor.fit_transform(X_train, train_data.targets)
     print(f"  Features shape: {X_train_feat.shape}")
 
@@ -183,68 +206,154 @@ def main():
 
         if args.two_stage:
             # Two-stage optimization (recommended for large search space)
-            from src.optimization import optimize_preprocessing_only, optimize_model_only
-
             print("\n  === Two-Stage Optimization ===")
-            print("  Stage 1: Optimizing preprocessing + PCA (fixed model)...")
-            print(f"  Searching: baseline_lam (1e5-1e7), baseline_p (0.001-0.05)")
-            print(f"  Searching: savgol_window (7-21 odd), savgol_polyorder (2-4)")
-            print(f"  Searching: n_components [{args.n_components_min}, {args.n_components_max}]")
 
-            stage1_params, stage1_score = optimize_preprocessing_only(
-                train_data.spectra,
-                y_train,
-                n_components_range=(args.n_components_min, args.n_components_max),
-                cv=args.cv,
-                n_trials=args.n_trials,
-                subsample_ratio=args.subsample_ratio,
-            )
-            print(f"  Stage 1 Best RMSE: {stage1_score:.4f}")
-            print(f"  Stage 1 params: {stage1_params}")
+            if args.optimize_features:
+                # Extended Stage 1: Also optimize feature method (PCA vs wavelength selection)
+                from src.optimization import optimize_preprocessing_and_features, optimize_model_with_features
 
-            # Apply Stage 1 optimal preprocessing
-            opt_baseline_lam = stage1_params.get("baseline_lam", args.baseline_lam)
-            opt_baseline_p = stage1_params.get("baseline_p", args.baseline_p)
-            opt_savgol_window = stage1_params.get("savgol_window", args.savgol_window)
-            opt_savgol_polyorder = stage1_params.get("savgol_polyorder", args.savgol_polyorder)
-            opt_n_components = stage1_params.get("n_components", args.n_components)
+                print("  Stage 1: Optimizing preprocessing + feature method (PCA vs wavelength selection)...")
+                print(f"  Searching: baseline_lam (1e5-1e7), baseline_p (0.001-0.05)")
+                print(f"  Searching: savgol_window (7-21 odd), savgol_polyorder (2-4)")
+                print(f"  Searching: feature_method [pca, wavelength_selection]")
+                print(f"  If PCA: n_components [{args.n_components_min}, {args.n_components_max}]")
+                print(f"  If wavelength_selection: n_selected_wavelengths [{args.n_selected_min}, {args.n_selected_max}], selection_method [correlation, variance, f_score]")
 
-            print(f"\n  Applying optimal preprocessing: lam={opt_baseline_lam:.2e}, p={opt_baseline_p:.4f}, "
-                  f"window={opt_savgol_window}, polyorder={opt_savgol_polyorder}")
+                stage1_params, stage1_score = optimize_preprocessing_and_features(
+                    train_data.spectra,
+                    y_train,
+                    n_components_range=(args.n_components_min, args.n_components_max),
+                    n_wavelengths_range=(args.n_selected_min, args.n_selected_max),
+                    cv=args.cv,
+                    n_trials=args.n_trials,
+                    subsample_ratio=args.subsample_ratio,
+                )
+                print(f"  Stage 1 Best RMSE: {stage1_score:.4f}")
+                print(f"  Stage 1 params: {stage1_params}")
 
-            preprocessor = Preprocessor(
-                baseline=args.baseline,
-                normalize=args.normalize,
-                denoise=args.denoise,
-                baseline_lam=opt_baseline_lam,
-                baseline_p=opt_baseline_p,
-                savgol_window=opt_savgol_window,
-                savgol_polyorder=opt_savgol_polyorder,
-            )
-            X_train = preprocessor.fit_transform(train_data.spectra)
-            if test_data is not None:
-                X_test = preprocessor.transform(test_data.spectra)
+                # Extract optimal parameters
+                opt_baseline_lam = stage1_params.get("baseline_lam", args.baseline_lam)
+                opt_baseline_p = stage1_params.get("baseline_p", args.baseline_p)
+                opt_savgol_window = stage1_params.get("savgol_window", args.savgol_window)
+                opt_savgol_polyorder = stage1_params.get("savgol_polyorder", args.savgol_polyorder)
+                opt_feature_method = stage1_params.get("feature_method", "pca")
+                opt_n_components = stage1_params.get("n_components", args.n_components)
+                opt_n_wavelengths = stage1_params.get("n_wavelengths", args.n_selected_wavelengths)
+                opt_selection_method = stage1_params.get("selection_method", args.selection_method)
 
-            # Stage 2: Optimize model params with full data
-            print(f"\n  Stage 2: Optimizing {best_model_name} hyperparameters (full data)...")
-            best_params, stage2_score = optimize_model_only(
-                X_train,  # Preprocessed with optimal params
-                y_train,
-                model_name=best_model_name,
-                n_components=opt_n_components,
-                cv=args.cv,
-                n_trials=args.n_trials,
-            )
-            print(f"  Stage 2 Best RMSE: {stage2_score:.4f}")
-            print(f"  Stage 2 params: {best_params}")
+                print(f"\n  Optimal preprocessing: lam={opt_baseline_lam:.2e}, p={opt_baseline_p:.4f}, "
+                      f"window={opt_savgol_window}, polyorder={opt_savgol_polyorder}")
+                print(f"  Optimal feature method: {opt_feature_method}")
 
-            # Update feature extractor with optimal n_components
-            print(f"\n  Final n_components: {opt_n_components}")
-            feature_extractor = FeatureExtractor(method="pca", n_components=opt_n_components)
-            X_train_feat = feature_extractor.fit_transform(X_train, train_data.targets)
-            print(f"  Final features shape: {X_train_feat.shape}")
-            if X_test is not None:
-                X_test_feat = feature_extractor.transform(X_test)
+                # Apply optimal preprocessing
+                preprocessor = Preprocessor(
+                    baseline=args.baseline,
+                    normalize=args.normalize,
+                    denoise=args.denoise,
+                    baseline_lam=opt_baseline_lam,
+                    baseline_p=opt_baseline_p,
+                    savgol_window=opt_savgol_window,
+                    savgol_polyorder=opt_savgol_polyorder,
+                )
+                X_train = preprocessor.fit_transform(train_data.spectra)
+                if test_data is not None:
+                    X_test = preprocessor.transform(test_data.spectra)
+
+                # Stage 2: Optimize model params with optimal feature method
+                print(f"\n  Stage 2: Optimizing {best_model_name} hyperparameters (full data)...")
+                best_params, stage2_score = optimize_model_with_features(
+                    X_train,
+                    y_train,
+                    model_name=best_model_name,
+                    feature_method=opt_feature_method,
+                    n_components=opt_n_components,
+                    n_wavelengths=opt_n_wavelengths,
+                    selection_method=opt_selection_method,
+                    cv=args.cv,
+                    n_trials=args.n_trials,
+                )
+                print(f"  Stage 2 Best RMSE: {stage2_score:.4f}")
+                print(f"  Stage 2 params: {best_params}")
+
+                # Build final feature extractor
+                if opt_feature_method == "pca":
+                    print(f"\n  Final feature method: PCA with n_components={opt_n_components}")
+                    feature_extractor = FeatureExtractor(method="pca", n_components=opt_n_components)
+                else:
+                    print(f"\n  Final feature method: wavelength_selection ({opt_selection_method}) with n_wavelengths={opt_n_wavelengths}")
+                    feature_extractor = FeatureExtractor(
+                        method="wavelength_selection",
+                        n_components=opt_n_wavelengths,
+                        selection_method=opt_selection_method,
+                    )
+                X_train_feat = feature_extractor.fit_transform(X_train, train_data.targets)
+                print(f"  Final features shape: {X_train_feat.shape}")
+                if X_test is not None:
+                    X_test_feat = feature_extractor.transform(X_test)
+
+            else:
+                # Original two-stage: preprocessing + PCA only
+                from src.optimization import optimize_preprocessing_only, optimize_model_only
+
+                print("  Stage 1: Optimizing preprocessing + PCA (fixed model)...")
+                print(f"  Searching: baseline_lam (1e5-1e7), baseline_p (0.001-0.05)")
+                print(f"  Searching: savgol_window (7-21 odd), savgol_polyorder (2-4)")
+                print(f"  Searching: n_components [{args.n_components_min}, {args.n_components_max}]")
+
+                stage1_params, stage1_score = optimize_preprocessing_only(
+                    train_data.spectra,
+                    y_train,
+                    n_components_range=(args.n_components_min, args.n_components_max),
+                    cv=args.cv,
+                    n_trials=args.n_trials,
+                    subsample_ratio=args.subsample_ratio,
+                )
+                print(f"  Stage 1 Best RMSE: {stage1_score:.4f}")
+                print(f"  Stage 1 params: {stage1_params}")
+
+                # Apply Stage 1 optimal preprocessing
+                opt_baseline_lam = stage1_params.get("baseline_lam", args.baseline_lam)
+                opt_baseline_p = stage1_params.get("baseline_p", args.baseline_p)
+                opt_savgol_window = stage1_params.get("savgol_window", args.savgol_window)
+                opt_savgol_polyorder = stage1_params.get("savgol_polyorder", args.savgol_polyorder)
+                opt_n_components = stage1_params.get("n_components", args.n_components)
+
+                print(f"\n  Applying optimal preprocessing: lam={opt_baseline_lam:.2e}, p={opt_baseline_p:.4f}, "
+                      f"window={opt_savgol_window}, polyorder={opt_savgol_polyorder}")
+
+                preprocessor = Preprocessor(
+                    baseline=args.baseline,
+                    normalize=args.normalize,
+                    denoise=args.denoise,
+                    baseline_lam=opt_baseline_lam,
+                    baseline_p=opt_baseline_p,
+                    savgol_window=opt_savgol_window,
+                    savgol_polyorder=opt_savgol_polyorder,
+                )
+                X_train = preprocessor.fit_transform(train_data.spectra)
+                if test_data is not None:
+                    X_test = preprocessor.transform(test_data.spectra)
+
+                # Stage 2: Optimize model params with full data
+                print(f"\n  Stage 2: Optimizing {best_model_name} hyperparameters (full data)...")
+                best_params, stage2_score = optimize_model_only(
+                    X_train,  # Preprocessed with optimal params
+                    y_train,
+                    model_name=best_model_name,
+                    n_components=opt_n_components,
+                    cv=args.cv,
+                    n_trials=args.n_trials,
+                )
+                print(f"  Stage 2 Best RMSE: {stage2_score:.4f}")
+                print(f"  Stage 2 params: {best_params}")
+
+                # Update feature extractor with optimal n_components
+                print(f"\n  Final n_components: {opt_n_components}")
+                feature_extractor = FeatureExtractor(method="pca", n_components=opt_n_components)
+                X_train_feat = feature_extractor.fit_transform(X_train, train_data.targets)
+                print(f"  Final features shape: {X_train_feat.shape}")
+                if X_test is not None:
+                    X_test_feat = feature_extractor.transform(X_test)
 
         elif args.optimize_preprocess:
             # Full pipeline optimization: preprocessing + PCA + model hyperparameters
