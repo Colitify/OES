@@ -8,7 +8,7 @@ from sklearn.svm import SVR
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional, Literal, Tuple
 import joblib
 from pathlib import Path
 
@@ -170,3 +170,198 @@ def load_model(filepath: str):
         Loaded model
     """
     return joblib.load(filepath)
+
+
+def get_ensemble_model(
+    n_targets: int = 1,
+    base_models: Optional[list] = None,
+    ensemble_method: Literal["stacking", "voting"] = "stacking",
+    final_estimator_alpha: float = 1.0,
+) -> Any:
+    """Create an ensemble model combining multiple base models.
+
+    Args:
+        n_targets: Number of target variables
+        base_models: List of model names to include (default: ["pls", "ridge", "rf"])
+        ensemble_method: "stacking" (meta-learner) or "voting" (average)
+        final_estimator_alpha: Ridge alpha for stacking final estimator
+
+    Returns:
+        Ensemble model (StackingRegressor or VotingRegressor)
+    """
+    from sklearn.ensemble import StackingRegressor, VotingRegressor
+
+    if base_models is None:
+        base_models = ["pls", "ridge", "rf"]
+
+    # Build base estimators list
+    estimators = []
+    for name in base_models:
+        if name == "pls":
+            estimators.append(("pls", PLSRegression(n_components=20)))
+        elif name == "ridge":
+            estimators.append(("ridge", Ridge(alpha=1000.0)))
+        elif name == "lasso":
+            estimators.append(("lasso", Lasso(alpha=0.01, max_iter=10000)))
+        elif name == "elastic_net":
+            estimators.append(("elastic_net", ElasticNet(alpha=0.01, l1_ratio=0.5, max_iter=10000)))
+        elif name == "rf":
+            estimators.append(("rf", RandomForestRegressor(n_estimators=100, n_jobs=-1, random_state=42)))
+
+    if not estimators:
+        raise ValueError("No valid base models specified for ensemble")
+
+    if ensemble_method == "stacking":
+        # StackingRegressor with Ridge as final estimator
+        # For multi-output, use MultiOutputRegressor wrapper
+        from sklearn.multioutput import MultiOutputRegressor
+
+        base_ensemble = StackingRegressor(
+            estimators=estimators,
+            final_estimator=Ridge(alpha=final_estimator_alpha),
+            cv=5,
+            n_jobs=-1,
+        )
+
+        if n_targets > 1:
+            return MultiOutputRegressor(base_ensemble)
+        return base_ensemble
+
+    else:  # voting
+        # VotingRegressor averages predictions
+        from sklearn.multioutput import MultiOutputRegressor
+
+        base_ensemble = VotingRegressor(
+            estimators=estimators,
+            n_jobs=-1,
+        )
+
+        if n_targets > 1:
+            return MultiOutputRegressor(base_ensemble)
+        return base_ensemble
+
+
+def get_optimized_ensemble_model(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_targets: int = 1,
+    base_models: Optional[list] = None,
+    ensemble_method: Literal["stacking", "voting"] = "stacking",
+    cv: int = 5,
+    n_trials: int = 20,
+) -> Tuple[Any, Dict[str, Any], float]:
+    """Create an ensemble with optimized base model hyperparameters.
+
+    First optimizes each base model individually, then combines them.
+
+    Args:
+        X: Feature matrix (already preprocessed and feature-extracted)
+        y: Target matrix
+        n_targets: Number of target variables
+        base_models: List of model names to include
+        ensemble_method: "stacking" or "voting"
+        cv: Cross-validation folds for optimization
+        n_trials: Optuna trials per base model
+
+    Returns:
+        Tuple of (ensemble_model, best_params_dict, best_ensemble_score)
+    """
+    from sklearn.ensemble import StackingRegressor, VotingRegressor
+    from sklearn.model_selection import cross_val_score
+    import warnings
+
+    if base_models is None:
+        base_models = ["pls", "ridge", "rf"]
+
+    # Import optimization functions
+    try:
+        from src.optimization import optimize_pls, optimize_ridge, optimize_rf
+        OPTUNA_AVAILABLE = True
+    except ImportError:
+        OPTUNA_AVAILABLE = False
+
+    estimators = []
+    all_params = {}
+
+    for name in base_models:
+        print(f"    Optimizing base model: {name}...")
+
+        if OPTUNA_AVAILABLE:
+            if name == "pls":
+                params, _ = optimize_pls(X, y, cv=cv, n_trials=n_trials)
+                model = PLSRegression(**params)
+                all_params["pls"] = params
+            elif name == "ridge":
+                params, _ = optimize_ridge(X, y, cv=cv, n_trials=n_trials)
+                model = Ridge(**params)
+                all_params["ridge"] = params
+            elif name == "rf":
+                params, _ = optimize_rf(X, y, cv=cv, n_trials=n_trials)
+                model = RandomForestRegressor(**params, n_jobs=-1, random_state=42)
+                all_params["rf"] = params
+            elif name == "lasso":
+                from src.optimization import optimize_lasso
+                params, _ = optimize_lasso(X, y, cv=cv, n_trials=n_trials)
+                model = Lasso(**params, max_iter=10000)
+                all_params["lasso"] = params
+            else:
+                print(f"      Skipping unknown model: {name}")
+                continue
+        else:
+            # Fall back to defaults if Optuna not available
+            if name == "pls":
+                model = PLSRegression(n_components=20)
+            elif name == "ridge":
+                model = Ridge(alpha=1000.0)
+            elif name == "rf":
+                model = RandomForestRegressor(n_estimators=100, n_jobs=-1, random_state=42)
+            elif name == "lasso":
+                model = Lasso(alpha=0.01, max_iter=10000)
+            else:
+                continue
+
+        estimators.append((name, model))
+
+    if not estimators:
+        raise ValueError("No valid base models for ensemble")
+
+    # Create ensemble
+    if ensemble_method == "stacking":
+        from sklearn.multioutput import MultiOutputRegressor
+
+        base_ensemble = StackingRegressor(
+            estimators=estimators,
+            final_estimator=Ridge(alpha=1.0),
+            cv=5,
+            n_jobs=-1,
+        )
+
+        if n_targets > 1:
+            ensemble = MultiOutputRegressor(base_ensemble)
+        else:
+            ensemble = base_ensemble
+
+    else:  # voting
+        from sklearn.multioutput import MultiOutputRegressor
+
+        base_ensemble = VotingRegressor(
+            estimators=estimators,
+            n_jobs=-1,
+        )
+
+        if n_targets > 1:
+            ensemble = MultiOutputRegressor(base_ensemble)
+        else:
+            ensemble = base_ensemble
+
+    # Evaluate ensemble
+    print(f"    Evaluating {ensemble_method} ensemble...")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        scores = cross_val_score(ensemble, X, y, cv=cv, scoring="neg_root_mean_squared_error")
+    ensemble_score = -scores.mean()
+
+    all_params["ensemble_method"] = ensemble_method
+    all_params["ensemble_rmse"] = ensemble_score
+
+    return ensemble, all_params, ensemble_score
