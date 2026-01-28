@@ -36,8 +36,8 @@
         "RMSE_mean improves or stays within tolerance"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "RMSE_mean improved from 2.930 to 2.907 (0.8%). Optimal: baseline_lam=4.16e5, baseline_p=0.026, savgol_window=13, savgol_polyorder=4, n_components=86"
     },
     {
       "id": "ML-004",
