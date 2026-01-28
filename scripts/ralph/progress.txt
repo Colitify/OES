@@ -139,3 +139,41 @@
 - MultiOutputRegressor wrapper needed for multi-target regression
 - Ensemble benefits: robustness across different targets, reduced variance
 - For this dataset, optimized Ridge alone performs comparably to ensemble
+
+## ML-006 - Add per-target model optimization
+**Status**: PASSED
+**Date**: 2026-01-28
+**RMSE_mean**: 2.912 (within tolerance of baseline 2.907)
+**Per-Target CV Score**: ~2.73 (mean of individual target RMSE)
+
+### Changes Made:
+- Added `optimize_per_target()` function in src/optimization.py for separate model optimization per target
+- Added `PerTargetRegressor` class: sklearn-compatible wrapper for multi-output with independent models
+- New CLI flags:
+  - --per_target: Enable per-target optimization mode (train separate model per element)
+
+### PerTargetRegressor Architecture:
+- Inherits from sklearn's BaseEstimator and RegressorMixin for sklearn compatibility
+- Custom `__sklearn_clone__()` preserves hyperparameters during cross_val_predict
+- fit() trains each model on its corresponding target column
+- predict() stacks predictions from all individual models
+
+### Optimal Parameters Found (per target):
+- C: alpha=9590.68 (high regularization)
+- Si: alpha=9921.82 (high regularization)
+- Mn: alpha=9823.95 (high regularization)
+- Cr: alpha=8755.07 (high regularization)
+- Mo: alpha=275.67 (low regularization)
+- Ni: alpha=7098.58 (high regularization)
+- Cu: alpha=216.91 (low regularization)
+- Fe: alpha=5398.16 (moderate regularization)
+
+### Learnings:
+- Per-target optimization reveals different optimal alpha values for each element (ranging from 217 to 9922)
+- On this dataset, per-target optimization achieves comparable RMSE to shared model (2.912 vs 2.907)
+- Cross_val_predict RMSE (2.91) is higher than mean of individual target CV scores (2.73) due to honest generalization assessment
+- Elements with similar chemical behavior (C, Si, Mn, Cr) prefer high regularization (~9000-10000)
+- Elements with distinct spectral signatures (Mo, Cu) prefer lower regularization (~200-300)
+- sklearn clone compatibility requires BaseEstimator inheritance + custom __sklearn_clone__()
+- Per-target optimization may be beneficial when targets have very different characteristics
+- For homogeneous multi-output regression, a shared model often generalizes better
