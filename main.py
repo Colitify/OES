@@ -119,6 +119,9 @@ def main():
         help="Base models for ensemble (default: pls ridge rf)"
     )
 
+    # Per-target optimization (ML-006)
+    parser.add_argument("--per_target", action="store_true", help="Train separate optimized model per target element")
+
     args = parser.parse_args()
 
     # Fix randomness for reproducibility
@@ -198,8 +201,34 @@ def main():
 
     models = get_traditional_models(n_targets=train_data.n_targets)
 
+    # Per-target optimization mode (ML-006)
+    if args.per_target:
+        print(f"\n  === Per-Target Optimization Mode ===")
+        print(f"  Model: {args.model}")
+        print(f"  Training separate optimized model per target element")
+
+        from src.optimization import optimize_per_target, PerTargetRegressor
+
+        per_target_models, per_target_params, per_target_scores = optimize_per_target(
+            X_train_feat, y_train,
+            model_name=args.model,
+            target_names=target_names,
+            cv=args.cv,
+            n_trials=args.n_trials,
+        )
+
+        best_model = PerTargetRegressor(per_target_models, target_names=target_names)
+        best_model_name = f"{args.model}_per_target"
+
+        # Report overall score
+        overall_rmse = np.mean(list(per_target_scores.values()))
+        print(f"\n  Per-Target Optimization Complete:")
+        print(f"    Overall RMSE (mean of per-target): {overall_rmse:.4f}")
+        for tname, score in per_target_scores.items():
+            print(f"    {tname}: RMSE={score:.4f}, params={per_target_params[tname]}")
+
     # Ensemble mode (ML-005)
-    if args.ensemble:
+    elif args.ensemble:
         print(f"\n  === Ensemble Mode ({args.ensemble_method}) ===")
         print(f"  Base models: {args.ensemble_models}")
 
@@ -240,8 +269,8 @@ def main():
         best_model_name = args.model
         best_model = models[best_model_name]
 
-    # Hyperparameter optimization (skip if ensemble mode - already optimized)
-    if args.optimize and not args.ensemble:
+    # Hyperparameter optimization (skip if ensemble or per_target mode - already optimized)
+    if args.optimize and not args.ensemble and not args.per_target:
         print(f"\n  Optimizing {best_model_name}...")
 
         if args.two_stage:

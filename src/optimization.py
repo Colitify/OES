@@ -815,6 +815,182 @@ def optimize_model_with_features(
     return study.best_params, study.best_value
 
 
+def optimize_per_target(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_name: str = "ridge",
+    target_names: Optional[list] = None,
+    cv: int = 5,
+    n_trials: int = 20,
+) -> Tuple[list, Dict[str, Dict[str, Any]], Dict[str, float]]:
+    """Optimize model hyperparameters separately for each target.
+
+    Trains an independent model per target, allowing each to have different
+    optimal hyperparameters. This can improve overall RMSE when targets have
+    different characteristics.
+
+    Args:
+        X: Feature matrix
+        y: Target matrix (n_samples, n_targets)
+        model_name: Model to optimize ("ridge", "lasso", "pls", "rf")
+        target_names: Names of targets for reporting
+        cv: Number of CV folds
+        n_trials: Number of Optuna trials per target
+
+    Returns:
+        Tuple of (list_of_models, params_per_target, scores_per_target)
+        - list_of_models: List of trained models, one per target
+        - params_per_target: Dict mapping target name to best params
+        - scores_per_target: Dict mapping target name to best RMSE
+    """
+    if not OPTUNA_AVAILABLE:
+        raise ImportError("Optuna is required for optimization")
+
+    if y.ndim == 1:
+        y = y.reshape(-1, 1)
+
+    n_targets = y.shape[1]
+    if target_names is None:
+        target_names = [f"Target_{i}" for i in range(n_targets)]
+
+    models_list = []
+    params_per_target = {}
+    scores_per_target = {}
+
+    for i, target_name in enumerate(target_names):
+        print(f"\n  Optimizing for target: {target_name} ({i+1}/{n_targets})")
+        y_single = y[:, i]
+
+        def objective(trial):
+            if model_name == "ridge":
+                alpha = trial.suggest_float("alpha", 1e-4, 1e4, log=True)
+                model = Ridge(alpha=alpha)
+            elif model_name == "lasso":
+                alpha = trial.suggest_float("alpha", 1e-6, 1e2, log=True)
+                model = Lasso(alpha=alpha, max_iter=10000)
+            elif model_name == "pls":
+                n_components = trial.suggest_int("n_components", 5, min(50, X.shape[0] - 1, X.shape[1]))
+                model = PLSRegression(n_components=n_components)
+            elif model_name == "rf":
+                params = {
+                    "n_estimators": trial.suggest_int("n_estimators", 50, 300),
+                    "max_depth": trial.suggest_int("max_depth", 5, 50),
+                    "min_samples_split": trial.suggest_int("min_samples_split", 2, 20),
+                    "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
+                    "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
+                    "n_jobs": -1,
+                    "random_state": 42,
+                }
+                model = RandomForestRegressor(**params)
+            else:
+                raise ValueError(f"Unknown model: {model_name}")
+
+            scores = cross_val_score(model, X, y_single, cv=cv, scoring="neg_root_mean_squared_error")
+            return -scores.mean()
+
+        study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42 + i))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+        best_params = study.best_params
+        best_score = study.best_value
+
+        # Build final model with best params
+        if model_name == "ridge":
+            model = Ridge(**best_params)
+        elif model_name == "lasso":
+            model = Lasso(**best_params, max_iter=10000)
+        elif model_name == "pls":
+            model = PLSRegression(**best_params)
+        elif model_name == "rf":
+            model = RandomForestRegressor(**best_params, n_jobs=-1, random_state=42)
+
+        models_list.append(model)
+        params_per_target[target_name] = best_params
+        scores_per_target[target_name] = best_score
+
+        print(f"    Best RMSE: {best_score:.4f}")
+        print(f"    Best params: {best_params}")
+
+    return models_list, params_per_target, scores_per_target
+
+
+from sklearn.base import BaseEstimator, RegressorMixin, clone
+
+
+class PerTargetRegressor(BaseEstimator, RegressorMixin):
+    """Wrapper that uses separate models for each target.
+
+    Provides a sklearn-compatible interface for multi-output regression
+    where each target has its own independently optimized model.
+
+    Inherits from sklearn's BaseEstimator and RegressorMixin for compatibility
+    with sklearn's cross_val_predict and other utilities.
+    """
+
+    def __init__(self, models: list = None, target_names: Optional[list] = None):
+        """Initialize with a list of models, one per target.
+
+        Args:
+            models: List of fitted or unfitted models, one per target
+            target_names: Names of targets for reporting
+        """
+        self.models = models if models is not None else []
+        self.target_names = target_names
+
+    def __sklearn_clone__(self):
+        """Custom clone that preserves model hyperparameters."""
+        # Clone each model to preserve hyperparameters but reset fit state
+        cloned_models = [clone(model) for model in self.models]
+        return PerTargetRegressor(models=cloned_models, target_names=self.target_names)
+
+    @property
+    def n_targets(self):
+        """Number of targets (models)."""
+        return len(self.models) if self.models else 0
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """Fit each model to its corresponding target.
+
+        Args:
+            X: Feature matrix
+            y: Target matrix (n_samples, n_targets)
+        """
+        if y.ndim == 1:
+            y = y.reshape(-1, 1)
+
+        n_targets = len(self.models)
+        if y.shape[1] != n_targets:
+            raise ValueError(f"Expected {n_targets} targets, got {y.shape[1]}")
+
+        for i, model in enumerate(self.models):
+            model.fit(X, y[:, i])
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Predict using each model for its target.
+
+        Args:
+            X: Feature matrix
+
+        Returns:
+            Predictions matrix (n_samples, n_targets)
+        """
+        predictions = []
+        for model in self.models:
+            pred = model.predict(X)
+            if pred.ndim > 1:
+                pred = pred.ravel()
+            predictions.append(pred)
+
+        return np.column_stack(predictions)
+
+    def __repr__(self) -> str:
+        return f"PerTargetRegressor(n_targets={self.n_targets})"
+
+
 def optimize_all_models(
     X: np.ndarray,
     y: np.ndarray,
