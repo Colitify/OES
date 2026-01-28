@@ -37,6 +37,37 @@ def extract_peaks(
     return wavelengths[peaks], spectrum[peaks], properties
 
 
+def _correlation_column_wise(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Compute correlation between each column of X and y efficiently.
+
+    Memory-efficient alternative to np.corrcoef(X.T, y) which creates
+    a (n_features+1)x(n_features+1) matrix.
+
+    Args:
+        X: Feature matrix (n_samples, n_features)
+        y: Target vector (n_samples,)
+
+    Returns:
+        Correlation coefficients (n_features,)
+    """
+    # Center X and y
+    X_centered = X - X.mean(axis=0)
+    y_centered = y - y.mean()
+
+    # Compute covariance
+    cov = (X_centered * y_centered[:, np.newaxis]).mean(axis=0)
+
+    # Compute standard deviations
+    X_std = X_centered.std(axis=0)
+    y_std = y_centered.std()
+
+    # Avoid division by zero
+    X_std[X_std == 0] = 1e-10
+
+    # Pearson correlation
+    return cov / (X_std * y_std)
+
+
 def select_wavelengths(
     X: np.ndarray,
     y: np.ndarray,
@@ -58,10 +89,10 @@ def select_wavelengths(
         y = y.reshape(-1, 1)
 
     if method == "correlation":
-        # Average absolute correlation across targets
+        # Average absolute correlation across targets (memory-efficient)
         correlations = np.zeros(X.shape[1])
         for i in range(y.shape[1]):
-            corr = np.abs(np.corrcoef(X.T, y[:, i])[:-1, -1])
+            corr = np.abs(_correlation_column_wise(X, y[:, i]))
             correlations += corr
         correlations /= y.shape[1]
         indices = np.argsort(correlations)[-n_wavelengths:]
