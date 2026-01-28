@@ -62,8 +62,8 @@
         "RMSE_mean improves or stays within tolerance"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "RMSE_mean: 2.907 (no regression). Ensemble CV score ~2.86. New flags: --ensemble, --ensemble_method (stacking/voting), --ensemble_models"
     },
     {
       "id": "ML-006",

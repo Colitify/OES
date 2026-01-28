@@ -16,6 +16,8 @@ from src.models.traditional import (
     get_traditional_models,
     train_traditional_model,
     save_model,
+    get_ensemble_model,
+    get_optimized_ensemble_model,
 )
 from src.models.deep_learning import (
     Conv1DRegressor,
@@ -105,6 +107,18 @@ def main():
     parser.add_argument("--n_trials", type=int, default=20, help="Number of Optuna trials for optimization (default 20)")
     parser.add_argument("--subsample_ratio", type=float, default=0.3, help="Subsample ratio for preprocessing optimization (0.0-1.0). Lower=faster. Default 0.3")
 
+    # Ensemble parameters (ML-005)
+    parser.add_argument("--ensemble", action="store_true", help="Use ensemble model combining PLS + Ridge + RF")
+    parser.add_argument(
+        "--ensemble_method", type=str, default="stacking",
+        choices=["stacking", "voting"],
+        help="Ensemble method: stacking (meta-learner) or voting (average)"
+    )
+    parser.add_argument(
+        "--ensemble_models", type=str, nargs="+", default=["pls", "ridge", "rf"],
+        help="Base models for ensemble (default: pls ridge rf)"
+    )
+
     args = parser.parse_args()
 
     # Fix randomness for reproducibility
@@ -184,7 +198,33 @@ def main():
 
     models = get_traditional_models(n_targets=train_data.n_targets)
 
-    if args.model == "all":
+    # Ensemble mode (ML-005)
+    if args.ensemble:
+        print(f"\n  === Ensemble Mode ({args.ensemble_method}) ===")
+        print(f"  Base models: {args.ensemble_models}")
+
+        if args.optimize:
+            print("  Optimizing base models before ensemble...")
+            best_model, ensemble_params, ensemble_score = get_optimized_ensemble_model(
+                X_train_feat, y_train,
+                n_targets=train_data.n_targets,
+                base_models=args.ensemble_models,
+                ensemble_method=args.ensemble_method,
+                cv=args.cv,
+                n_trials=args.n_trials,
+            )
+            best_model_name = f"ensemble_{args.ensemble_method}"
+            print(f"  Ensemble RMSE: {ensemble_score:.4f}")
+            print(f"  Base model params: {ensemble_params}")
+        else:
+            best_model = get_ensemble_model(
+                n_targets=train_data.n_targets,
+                base_models=args.ensemble_models,
+                ensemble_method=args.ensemble_method,
+            )
+            best_model_name = f"ensemble_{args.ensemble_method}"
+
+    elif args.model == "all":
         comparison_df = compare_models(models, X_train_feat, y_train, cv=args.cv, target_names=target_names)
         print("\nModel Comparison:")
         print(comparison_df.to_string())
@@ -200,8 +240,8 @@ def main():
         best_model_name = args.model
         best_model = models[best_model_name]
 
-    # Hyperparameter optimization
-    if args.optimize:
+    # Hyperparameter optimization (skip if ensemble mode - already optimized)
+    if args.optimize and not args.ensemble:
         print(f"\n  Optimizing {best_model_name}...")
 
         if args.two_stage:
