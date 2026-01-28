@@ -105,3 +105,37 @@
 - Adding --optimize_features increases search space significantly; recommend more trials (30+)
 - Feature method choice is dataset-dependent; wavelength selection may work better on other datasets
 - Direct wavelength selection requires higher regularization (ill-conditioned matrix warnings)
+
+## ML-005 - Add ensemble model support
+**Status**: PASSED
+**Date**: 2026-01-28
+**RMSE_mean**: 2.907 (no regression from baseline)
+**Ensemble CV Score**: ~2.86
+
+### Changes Made:
+- Added `get_ensemble_model()` in src/models/traditional.py for creating ensemble with default params
+- Added `get_optimized_ensemble_model()` for optimizing base models before combining
+- New CLI flags:
+  - --ensemble: Enable ensemble mode
+  - --ensemble_method: Choose between stacking (meta-learner) or voting (average)
+  - --ensemble_models: Specify base models (default: pls ridge rf)
+
+### Ensemble Architecture:
+- Stacking: Uses StackingRegressor with Ridge as final estimator
+- Voting: Uses VotingRegressor to average predictions
+- For multi-target: Wrapped with MultiOutputRegressor
+- Base models optimized individually via Optuna before combining
+
+### Optimal Parameters Found:
+- PLS n_components: 12-19
+- Ridge alpha: ~6854
+- RF: n_estimators=72, max_depth=14, min_samples_split=2, min_samples_leaf=4, max_features=None
+
+### Learnings:
+- Stacking ensemble with optimized base models achieves CV score ~2.86
+- Final evaluation RMSE (~3.0) slightly higher than CV score due to overfitting risk
+- Ensemble doesn't always outperform optimized single models on small datasets
+- Base model optimization before ensemble is critical for good performance
+- MultiOutputRegressor wrapper needed for multi-target regression
+- Ensemble benefits: robustness across different targets, reduced variance
+- For this dataset, optimized Ridge alone performs comparably to ensemble
