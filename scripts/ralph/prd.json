@@ -75,8 +75,8 @@
         "Overall RMSE_mean improves or stays within tolerance"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "RMSE_mean: 2.912 (within tolerance of baseline 2.907). Per-target allows different alpha per element: C=9590, Si=9922, Mn=9824, Cr=8755, Mo=276, Ni=7099, Cu=217, Fe=5398"
     },
     {
       "id": "ML-007",
