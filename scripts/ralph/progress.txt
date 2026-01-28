@@ -72,3 +72,36 @@
 - savgol_window_half trick ensures odd window sizes: window = 2*half + 1
 - Higher savgol_polyorder (4 vs 3) captures more spectral detail
 - Higher baseline_p (0.026 vs 0.01) means less aggressive baseline correction
+
+## ML-004 - Add feature selection methods to optimization
+**Status**: PASSED
+**Date**: 2026-01-28
+**RMSE_mean**: 2.907 (no regression from baseline)
+
+### Changes Made:
+- Added wavelength selection as alternative feature extraction method in src/features.py:
+  - `select_wavelengths()` supports correlation, variance, f_score methods
+  - `_correlation_column_wise()` for memory-efficient correlation computation
+- Added `optimize_preprocessing_and_features()` in src/optimization.py for Stage 1 with feature method search
+- Added `optimize_model_with_features()` in src/optimization.py for Stage 2 with feature method
+- New CLI flags:
+  - --feature_method: Choose between pca or wavelength_selection
+  - --selection_method: Wavelength selection method (correlation, variance, f_score)
+  - --n_selected_wavelengths: Number of wavelengths to select (default 500)
+  - --n_selected_min, --n_selected_max: Search range for optimization
+  - --optimize_features: Enable feature method search in two-stage optimization
+
+### Optimal Parameters Found:
+- Feature method: PCA (outperforms wavelength_selection on this dataset)
+- n_components: 86-99 (consistent with ML-003)
+- Ridge alpha: ~5700-6854 (consistent with ML-003)
+- Preprocessing params: Similar to ML-003 baseline
+
+### Learnings:
+- PCA consistently outperforms direct wavelength selection for this spectral dataset
+- Wavelength selection trials (correlation, variance, f_score) showed RMSE 2.5-3.0+ on subsampled data
+- PCA trials showed RMSE ~2.06-2.12 on subsampled data
+- Memory-efficient correlation computation avoids creating (n_features+1)x(n_features+1) matrix
+- Adding --optimize_features increases search space significantly; recommend more trials (30+)
+- Feature method choice is dataset-dependent; wavelength selection may work better on other datasets
+- Direct wavelength selection requires higher regularization (ill-conditioned matrix warnings)
