@@ -40,3 +40,35 @@
 - TPESampler with 100 trials finds stable optimum around n_components=90-95 for Ridge
 - Ridge alpha optimal range: ~4000-6000 when combined with higher n_components
 - PLS model doesn't use PCA (has its own latent variable decomposition), handled as special case
+
+## ML-003 - Add preprocessing parameter optimization
+**Status**: PASSED
+**Date**: 2026-01-28
+**RMSE_mean**: 2.907 (improved from 2.930)
+
+### Changes Made:
+- Added `optimize_preprocessing_only()` function for Stage 1 (preprocessing + PCA optimization)
+- Added `optimize_model_only()` function for Stage 2 (model hyperparameter optimization)
+- Added `optimize_full_pipeline()` function for joint optimization (alternative approach)
+- New CLI flags:
+  - --optimize_preprocess: Enable full joint optimization
+  - --two_stage: Enable recommended two-stage optimization
+  - --n_trials: Number of Optuna trials (default 20)
+  - --subsample_ratio: Subsample ratio for faster preprocessing optimization (default 0.3)
+
+### Optimal Parameters Found:
+- baseline_lam: 4.16e5 (narrower than initial 1e6)
+- baseline_p: 0.026 (higher than initial 0.01)
+- savgol_window: 13 (slightly wider than initial 11)
+- savgol_polyorder: 4 (higher than initial 3)
+- n_components: 86 (close to ML-002's 95)
+- Ridge alpha: ~6854 (similar range to ML-002)
+
+### Learnings:
+- Two-stage optimization is recommended over joint optimization for large search spaces
+- Stage 1 uses 30% subsampling to speed up preprocessing optimization (the bottleneck)
+- Preprocessing optimization provides modest gains (~0.8%) when starting from a good baseline
+- Narrowing parameter search ranges (1e5-1e7 for baseline_lam) improves convergence
+- savgol_window_half trick ensures odd window sizes: window = 2*half + 1
+- Higher savgol_polyorder (4 vs 3) captures more spectral detail
+- Higher baseline_p (0.026 vs 0.01) means less aggressive baseline correction
