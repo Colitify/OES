@@ -49,8 +49,8 @@
         "RMSE_mean improves or stays within tolerance"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "RMSE_mean: 2.907 (no regression). PCA outperforms wavelength_selection on this dataset. New flags: --optimize_features, --selection_method, --n_selected_wavelengths"
     },
     {
       "id": "ML-005",
