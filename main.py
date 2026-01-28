@@ -79,6 +79,12 @@ def main():
     parser.add_argument("--savgol_window", type=int, default=11, help="Savitzky-Golay window length")
     parser.add_argument("--savgol_polyorder", type=int, default=3, help="Savitzky-Golay polynomial order")
 
+    # Feature extraction parameters
+    parser.add_argument("--n_components", type=int, default=50, help="Number of PCA components for feature extraction")
+    parser.add_argument("--n_components_min", type=int, default=10, help="Min n_components for optimization search")
+    parser.add_argument("--n_components_max", type=int, default=100, help="Max n_components for optimization search")
+    parser.add_argument("--optimize_n_components", action="store_true", help="Include n_components in hyperparameter optimization")
+
     args = parser.parse_args()
 
     # Fix randomness for reproducibility
@@ -133,7 +139,7 @@ def main():
 
     # 3. Feature extraction (optional PCA)
     print("\n[3/5] Feature extraction...")
-    feature_extractor = FeatureExtractor(method="pca", n_components=50)
+    feature_extractor = FeatureExtractor(method="pca", n_components=args.n_components)
     X_train_feat = feature_extractor.fit_transform(X_train, train_data.targets)
     print(f"  Features shape: {X_train_feat.shape}")
 
@@ -170,13 +176,36 @@ def main():
     # Hyperparameter optimization
     if args.optimize:
         print(f"\n  Optimizing {best_model_name}...")
-        from src.optimization import optimize_all_models
-        opt_results = optimize_all_models(
-            X_train_feat, y_train,
-            models=[best_model_name],
-            cv=args.cv
-        )
-        best_params, _ = opt_results[best_model_name]
+
+        if args.optimize_n_components:
+            # Joint optimization of n_components + model hyperparameters
+            from src.optimization import optimize_with_pca
+            print(f"  Including n_components in search range [{args.n_components_min}, {args.n_components_max}]...")
+            best_params, _ = optimize_with_pca(
+                X_train, y_train,
+                model_name=best_model_name,
+                n_components_range=(args.n_components_min, args.n_components_max),
+                cv=args.cv,
+                n_trials=100,
+            )
+
+            # Extract optimal n_components and rebuild feature extractor
+            opt_n_components = best_params.pop("n_components", args.n_components)
+            print(f"  Optimal n_components: {opt_n_components}")
+            feature_extractor = FeatureExtractor(method="pca", n_components=opt_n_components)
+            X_train_feat = feature_extractor.fit_transform(X_train, train_data.targets)
+            print(f"  Updated features shape: {X_train_feat.shape}")
+            if X_test is not None:
+                X_test_feat = feature_extractor.transform(X_test)
+        else:
+            # Standard model-only optimization (fixed n_components)
+            from src.optimization import optimize_all_models
+            opt_results = optimize_all_models(
+                X_train_feat, y_train,
+                models=[best_model_name],
+                cv=args.cv
+            )
+            best_params, _ = opt_results[best_model_name]
 
         from src.models.traditional import get_model_with_params
         best_model = get_model_with_params(best_model_name, best_params, train_data.n_targets)
