@@ -23,8 +23,8 @@
         "Best RMSE_mean improves or stays within tolerance"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "RMSE_mean improved from 3.314 to 2.930 (11.6%). Optimal n_components: 95"
     }
   ]
 }
