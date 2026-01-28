@@ -19,3 +19,24 @@
 - Default parameters: baseline_lam=1e6, baseline_p=0.01, savgol_window=11, savgol_polyorder=3
 - Pipeline uses PCA with 50 components for feature extraction (captures 94.5% variance)
 - metrics.json structure includes primary_metric.value for RMSE_mean guardrail checks
+
+## ML-002 - Make PCA n_components configurable + include in optimization search
+**Status**: PASSED
+**Date**: 2026-01-28
+**RMSE_mean**: 2.930 (improved from 3.314)
+
+### Changes Made:
+- Added CLI arguments for n_components configuration:
+  - --n_components (default: 50)
+  - --n_components_min (default: 10)
+  - --n_components_max (default: 100)
+  - --optimize_n_components (flag to enable joint optimization)
+- Added `optimize_with_pca()` function in src/optimization.py for joint optimization
+- Wired CLI args to FeatureExtractor and optimization flow in main.py
+
+### Learnings:
+- Joint optimization of n_components + model hyperparameters yields better results than fixed n_components
+- Optimal n_components for this dataset: 95 (vs default 50)
+- TPESampler with 100 trials finds stable optimum around n_components=90-95 for Ridge
+- Ridge alpha optimal range: ~4000-6000 when combined with higher n_components
+- PLS model doesn't use PCA (has its own latent variable decomposition), handled as special case
