@@ -210,6 +210,84 @@ PARAM_GRIDS = {
 }
 
 
+def optimize_with_pca(
+    X_raw: np.ndarray,
+    y: np.ndarray,
+    model_name: str = "ridge",
+    n_components_range: Tuple[int, int] = (10, 100),
+    cv: int = 5,
+    n_trials: int = 100,
+) -> Tuple[Dict[str, Any], float]:
+    """Jointly optimize PCA n_components and model hyperparameters.
+
+    Args:
+        X_raw: Raw/preprocessed spectra (before PCA)
+        y: Target matrix
+        model_name: Model to optimize ("ridge", "lasso", "pls", "rf")
+        n_components_range: Range for PCA n_components search
+        cv: Number of CV folds
+        n_trials: Number of optimization trials
+
+    Returns:
+        Tuple of (best_params including n_components, best_score)
+    """
+    if not OPTUNA_AVAILABLE:
+        raise ImportError("Optuna is required for optimization")
+
+    from sklearn.decomposition import PCA
+    from sklearn.pipeline import Pipeline
+
+    def objective(trial):
+        # Suggest n_components within range, but cap at max features
+        max_components = min(n_components_range[1], X_raw.shape[1], X_raw.shape[0] - 1)
+        min_components = min(n_components_range[0], max_components)
+        n_components = trial.suggest_int("n_components", min_components, max_components)
+
+        # Model-specific hyperparameters
+        if model_name == "ridge":
+            alpha = trial.suggest_float("alpha", 1e-4, 1e4, log=True)
+            model = Ridge(alpha=alpha)
+        elif model_name == "lasso":
+            alpha = trial.suggest_float("alpha", 1e-6, 1e2, log=True)
+            model = Lasso(alpha=alpha, max_iter=10000)
+        elif model_name == "pls":
+            # For PLS, n_components applies to the model, not PCA
+            # We skip PCA and use PLS directly
+            pls_components = trial.suggest_int("pls_n_components", 5, min(50, X_raw.shape[0] - 1))
+            model = PLSRegression(n_components=pls_components)
+            scores = cross_val_score(model, X_raw, y, cv=cv, scoring="neg_root_mean_squared_error")
+            return -scores.mean()
+        elif model_name == "rf":
+            params = {
+                "n_estimators": trial.suggest_int("n_estimators", 50, 300),
+                "max_depth": trial.suggest_int("max_depth", 5, 50),
+                "min_samples_split": trial.suggest_int("min_samples_split", 2, 20),
+                "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 10),
+                "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", None]),
+                "n_jobs": -1,
+                "random_state": 42,
+            }
+            model = RandomForestRegressor(**params)
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
+
+        # Create pipeline with PCA + model
+        pipeline = Pipeline([
+            ("pca", PCA(n_components=n_components)),
+            ("model", model),
+        ])
+
+        scores = cross_val_score(pipeline, X_raw, y, cv=cv, scoring="neg_root_mean_squared_error")
+        return -scores.mean()
+
+    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    return study.best_params, study.best_value
+
+
 def optimize_all_models(
     X: np.ndarray,
     y: np.ndarray,
