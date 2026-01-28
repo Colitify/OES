@@ -81,11 +81,17 @@ fi
 
 echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
 
+# Get repo root directory
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "==============================================================="
   echo "  Ralph Iteration $i of $MAX_ITERATIONS ($TOOL)"
   echo "==============================================================="
+
+  # Save current git state for potential rollback
+  BEFORE_SHA=$(cd "$REPO_ROOT" && git rev-parse HEAD 2>/dev/null || echo "")
 
   # Run the selected tool with the ralph prompt
   if [[ "$TOOL" == "amp" ]]; then
@@ -94,7 +100,7 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
     OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee >(cat >&2)) || true
   fi
-  
+
   # Check for completion signal
   if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
@@ -102,7 +108,27 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     echo "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
   fi
-  
+
+  # Run guardrail check if metrics.json exists
+  METRICS_FILE="$REPO_ROOT/results/metrics.json"
+  if [ -f "$METRICS_FILE" ]; then
+    echo "Running guardrail check..."
+    cd "$REPO_ROOT"
+    if python -m src.guardrail "$METRICS_FILE"; then
+      echo "Guardrail PASSED - changes accepted"
+    else
+      echo "Guardrail FAILED - rolling back changes"
+      # Rollback uncommitted changes
+      git checkout -- . 2>/dev/null || true
+      # If a new commit was made, reset to before
+      AFTER_SHA=$(git rev-parse HEAD 2>/dev/null || echo "")
+      if [ -n "$BEFORE_SHA" ] && [ -n "$AFTER_SHA" ] && [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
+        echo "Resetting to previous commit: $BEFORE_SHA"
+        git reset --hard "$BEFORE_SHA" 2>/dev/null || true
+      fi
+    fi
+  fi
+
   echo "Iteration $i complete. Continuing..."
   sleep 2
 done

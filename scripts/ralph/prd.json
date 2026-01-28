@@ -25,6 +25,71 @@
       "priority": 2,
       "passes": true,
       "notes": "RMSE_mean improved from 3.314 to 2.930 (11.6%). Optimal n_components: 95"
+    },
+    {
+      "id": "ML-003",
+      "title": "Add preprocessing parameter optimization",
+      "acceptanceCriteria": [
+        "Optuna searches baseline_lam (1e4-1e8), baseline_p (0.001-0.1)",
+        "Optuna searches savgol_window (5-31 odd), savgol_polyorder (2-5)",
+        "Joint optimization with model hyperparameters",
+        "RMSE_mean improves or stays within tolerance"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "ML-004",
+      "title": "Add feature selection methods to optimization",
+      "acceptanceCriteria": [
+        "Support wavelength selection (correlation, variance, f_score)",
+        "Optuna can choose between PCA vs wavelength_selection",
+        "Optuna can search n_selected_wavelengths (100-1000)",
+        "RMSE_mean improves or stays within tolerance"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "ML-005",
+      "title": "Add ensemble model support",
+      "acceptanceCriteria": [
+        "Support stacking/voting ensemble of top models",
+        "CLI flag --ensemble to enable",
+        "Combine predictions from PLS + Ridge + RF",
+        "RMSE_mean improves or stays within tolerance"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "ML-006",
+      "title": "Add per-target model optimization",
+      "acceptanceCriteria": [
+        "Train separate optimized model per target element",
+        "Each target can have different optimal hyperparameters",
+        "CLI flag --per_target to enable",
+        "Overall RMSE_mean improves or stays within tolerance"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "ML-007",
+      "title": "Add deep learning model to pipeline",
+      "acceptanceCriteria": [
+        "1D-CNN model available via --model cnn",
+        "Works on CPU (GPU optional)",
+        "Optuna can tune CNN hyperparameters (channels, kernel_size, dropout)",
+        "Compare performance with traditional models"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
