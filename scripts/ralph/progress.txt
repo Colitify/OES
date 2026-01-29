@@ -177,3 +177,50 @@
 - sklearn clone compatibility requires BaseEstimator inheritance + custom __sklearn_clone__()
 - Per-target optimization may be beneficial when targets have very different characteristics
 - For homogeneous multi-output regression, a shared model often generalizes better
+
+## ML-007 - Add deep learning model to pipeline
+**Status**: PASSED
+**Date**: 2026-01-29
+**RMSE_mean**: 2.907 (no regression from baseline)
+**CNN CV Score**: ~3.04 (with 10 Optuna trials)
+
+### Changes Made:
+- Added CNNRegressor sklearn-compatible wrapper in src/models/deep_learning.py
+- Inherited from BaseEstimator, RegressorMixin for sklearn compatibility
+- Added `_get_safe_device()` to auto-fallback from unsupported CUDA to CPU
+- Dynamic pooling in Conv1DRegressor to handle small input dimensions
+- Added `optimize_cnn()` function in src/optimization.py for Optuna hyperparameter tuning
+- Updated main.py to support --model cnn
+- Updated get_traditional_models() and get_model_with_params() to support CNN
+
+### CNN Architecture:
+- 1D convolutional layers with configurable channels
+- BatchNorm + ReLU + adaptive MaxPool per layer
+- Fully connected layers: Conv output -> 256 -> output_dim
+- Dropout for regularization
+- Early stopping with patience
+
+### Hyperparameters Optimized by Optuna:
+- n_layers: 1-3 (limited by input dimension)
+- channels: [16, 32, 64, 128] per layer
+- kernel_size: [3, 5, 7, 9]
+- dropout: 0.1-0.5
+- learning_rate: 1e-4 to 1e-2 (log scale)
+- batch_size: [16, 32, 64]
+
+### Best CNN Parameters Found (10 trials):
+- channels: [64]
+- kernel_size: 5
+- dropout: 0.25
+- learning_rate: 0.0008
+- batch_size: 16
+
+### Learnings:
+- CNN RMSE (~3.04) is higher than Ridge RMSE (~2.91) on this dataset
+- Deep learning models typically need more data to outperform traditional models
+- sklearn compatibility requires BaseEstimator + RegressorMixin inheritance
+- CUDA fallback to CPU is essential for portability (RTX 5090 needs CUDA 12.8+)
+- Dynamic pooling prevents "Invalid computed output size: 0" errors on small inputs
+- MaxPool1d(4) reduces dimension quickly; for small inputs, use smaller pool sizes
+- Error handling in Optuna objective prevents trial failures from crashing optimization
+- CNN training is slower than Ridge (~10s/trial vs ~3s/trial) due to neural network overhead
