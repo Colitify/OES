@@ -15,13 +15,15 @@ from pathlib import Path
 
 def get_traditional_models(
     n_targets: int = 1,
-    include_slow: bool = False
+    include_slow: bool = False,
+    include_deep: bool = False,
 ) -> Dict[str, Any]:
     """Get dictionary of traditional ML models.
 
     Args:
         n_targets: Number of target variables
         include_slow: Whether to include slower models (SVR, GBR)
+        include_deep: Whether to include deep learning models (CNN)
 
     Returns:
         Dictionary of {model_name: model}
@@ -44,11 +46,23 @@ def get_traditional_models(
             GradientBoostingRegressor(n_estimators=100, random_state=42)
         ) if n_targets > 1 else GradientBoostingRegressor(n_estimators=100, random_state=42)
 
+    if include_deep:
+        from src.models.deep_learning import CNNRegressor
+        models["cnn"] = CNNRegressor(
+            channels=[32, 64],
+            kernel_size=7,
+            dropout=0.3,
+            epochs=50,
+            batch_size=32,
+            learning_rate=1e-3,
+            verbose=False,
+        )
+
     return models
 
 
 def get_model_with_params(
-    model_name: Literal["pls", "ridge", "lasso", "elastic_net", "rf", "svr", "gbr"],
+    model_name: Literal["pls", "ridge", "lasso", "elastic_net", "rf", "svr", "gbr", "cnn"],
     params: Optional[Dict[str, Any]] = None,
     n_targets: int = 1
 ) -> Any:
@@ -92,6 +106,19 @@ def get_model_with_params(
             **params
         })
         return MultiOutputRegressor(base_model) if n_targets > 1 else base_model
+
+    elif model_name == "cnn":
+        from src.models.deep_learning import CNNRegressor
+        default_cnn_params = {
+            "channels": [32, 64],
+            "kernel_size": 7,
+            "dropout": 0.3,
+            "epochs": 50,
+            "batch_size": 32,
+            "learning_rate": 1e-3,
+            "verbose": False,
+        }
+        return CNNRegressor(**{**default_cnn_params, **params})
 
     else:
         raise ValueError(f"Unknown model: {model_name}")

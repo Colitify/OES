@@ -88,8 +88,8 @@
         "Compare performance with traditional models"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "CNN model added via --model cnn. With optimization (10 trials), CNN RMSE ~3.04 vs Ridge ~2.91. CNN works on CPU (auto-falls back from unsupported CUDA). Optuna tunes channels, kernel_size, dropout, learning_rate, batch_size."
     }
   ]
 }
