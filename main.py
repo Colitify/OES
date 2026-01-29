@@ -52,8 +52,8 @@ def main():
         "--model",
         type=str,
         default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "all"],
-        help="Model to train",
+        choices=["pls", "ridge", "lasso", "rf", "cnn", "all"],
+        help="Model to train (cnn = 1D-CNN deep learning model)",
     )
     parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
     parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
@@ -199,7 +199,9 @@ def main():
     y_train = train_data.targets
     target_names = train_data.target_names
 
-    models = get_traditional_models(n_targets=train_data.n_targets)
+    # Include CNN in models if requested
+    include_deep = args.model == "cnn" or args.model == "all"
+    models = get_traditional_models(n_targets=train_data.n_targets, include_deep=include_deep)
 
     # Per-target optimization mode (ML-006)
     if args.per_target:

@@ -8,6 +8,28 @@ from typing import Optional, List, Tuple
 from tqdm import tqdm
 
 
+def _get_safe_device() -> str:
+    """Get a device that is confirmed to work with PyTorch.
+
+    Checks if CUDA is available and actually functional (can run a simple op).
+    Falls back to CPU if CUDA is available but not compatible (e.g., GPU arch mismatch).
+
+    Returns:
+        "cuda" if CUDA is available and functional, "cpu" otherwise.
+    """
+    if not torch.cuda.is_available():
+        return "cpu"
+
+    try:
+        # Try a simple CUDA operation to confirm it works
+        test_tensor = torch.zeros(1, device="cuda")
+        _ = test_tensor + 1
+        return "cuda"
+    except Exception:
+        # CUDA is installed but not functional (e.g., incompatible GPU)
+        return "cpu"
+
+
 class Conv1DRegressor(nn.Module):
     """1D CNN for spectral regression."""
 
@@ -21,15 +43,36 @@ class Conv1DRegressor(nn.Module):
     ):
         super().__init__()
 
+        # Determine appropriate pooling factor based on input dimension
+        # We need output_size >= 1 after all pooling layers
+        # output_size = input_dim / (pool_size ^ n_layers)
+        # Choose pool_size such that output remains >= 1
+        n_layers = len(channels)
+        pool_size = 4  # default
+        if n_layers > 0:
+            # Ensure output dimension >= 1 after all pooling
+            max_pool_size = max(2, int(input_dim ** (1.0 / n_layers)))
+            pool_size = min(4, max_pool_size)
+
         layers = []
         in_ch = 1
+        current_dim = input_dim
         for ch in channels:
+            # Dynamically adjust pool size if dimension is too small
+            effective_pool = min(pool_size, max(1, current_dim // 2))
+            if effective_pool < 1:
+                effective_pool = 1
+
             layers += [
                 nn.Conv1d(in_ch, ch, kernel_size=kernel_size, padding=kernel_size // 2),
                 nn.BatchNorm1d(ch),
                 nn.ReLU(),
-                nn.MaxPool1d(4)
             ]
+            # Only add pooling if it won't reduce to 0
+            if effective_pool > 1:
+                layers.append(nn.MaxPool1d(effective_pool))
+                current_dim = current_dim // effective_pool
+
             in_ch = ch
         self.conv = nn.Sequential(*layers)
 
@@ -191,7 +234,7 @@ def train_deep_model(
         Tuple of (trained_model, history)
     """
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = _get_safe_device()
 
     model = model.to(device)
 
@@ -307,7 +350,7 @@ def predict(
         Predictions array
     """
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = _get_safe_device()
 
     model = model.to(device)
     model.eval()
@@ -333,6 +376,153 @@ def save_model(model: nn.Module, filepath: str):
 def load_model(model: nn.Module, filepath: str, device: Optional[str] = None) -> nn.Module:
     """Load PyTorch model."""
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = _get_safe_device()
     model.load_state_dict(torch.load(filepath, map_location=device))
     return model
+
+
+from sklearn.base import BaseEstimator, RegressorMixin
+
+
+class CNNRegressor(BaseEstimator, RegressorMixin):
+    """Sklearn-compatible wrapper for Conv1DRegressor.
+
+    Provides a sklearn-compatible interface for the 1D-CNN model,
+    allowing it to be used with cross_val_predict and other sklearn utilities.
+
+    Inherits from BaseEstimator and RegressorMixin for sklearn compatibility.
+    """
+
+    def __init__(
+        self,
+        channels: List[int] = None,
+        kernel_size: int = 7,
+        dropout: float = 0.3,
+        epochs: int = 50,
+        batch_size: int = 32,
+        learning_rate: float = 1e-3,
+        weight_decay: float = 1e-4,
+        patience: int = 10,
+        verbose: bool = False,
+    ):
+        """Initialize CNN regressor.
+
+        Args:
+            channels: List of channel sizes for conv layers (default: [32, 64])
+            kernel_size: Convolution kernel size
+            dropout: Dropout rate
+            epochs: Training epochs
+            batch_size: Batch size
+            learning_rate: Learning rate
+            weight_decay: L2 regularization
+            patience: Early stopping patience
+            verbose: Whether to print training progress
+        """
+        self.channels = channels if channels is not None else [32, 64]
+        self.kernel_size = kernel_size
+        self.dropout = dropout
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.patience = patience
+        self.verbose = verbose
+        self.model_ = None
+        self.device_ = None
+        self.input_dim_ = None
+        self.output_dim_ = None
+
+    def get_params(self, deep: bool = True):
+        """Get parameters for sklearn."""
+        return {
+            "channels": self.channels,
+            "kernel_size": self.kernel_size,
+            "dropout": self.dropout,
+            "epochs": self.epochs,
+            "batch_size": self.batch_size,
+            "learning_rate": self.learning_rate,
+            "weight_decay": self.weight_decay,
+            "patience": self.patience,
+            "verbose": self.verbose,
+        }
+
+    def set_params(self, **params):
+        """Set parameters for sklearn."""
+        for key, value in params.items():
+            setattr(self, key, value)
+        return self
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """Fit the CNN model.
+
+        Args:
+            X: Feature matrix (n_samples, n_features)
+            y: Target matrix (n_samples, n_targets) or (n_samples,)
+        """
+        self.device_ = _get_safe_device()
+        self.input_dim_ = X.shape[1]
+
+        if y.ndim == 1:
+            y = y.reshape(-1, 1)
+        self.output_dim_ = y.shape[1]
+
+        # Create model
+        self.model_ = Conv1DRegressor(
+            input_dim=self.input_dim_,
+            output_dim=self.output_dim_,
+            channels=self.channels,
+            kernel_size=self.kernel_size,
+            dropout=self.dropout,
+        )
+
+        # Split for validation (10% of data)
+        n_samples = X.shape[0]
+        n_val = max(1, int(n_samples * 0.1))
+        indices = np.random.permutation(n_samples)
+        train_idx, val_idx = indices[n_val:], indices[:n_val]
+
+        X_train, X_val = X[train_idx], X[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
+
+        # Train
+        self.model_, _ = train_deep_model(
+            self.model_,
+            X_train, y_train,
+            X_val, y_val,
+            epochs=self.epochs,
+            batch_size=self.batch_size,
+            learning_rate=self.learning_rate,
+            weight_decay=self.weight_decay,
+            patience=self.patience,
+            device=self.device_,
+            verbose=self.verbose,
+        )
+
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """Make predictions.
+
+        Args:
+            X: Feature matrix
+
+        Returns:
+            Predictions
+        """
+        if self.model_ is None:
+            raise ValueError("Model not fitted. Call fit() first.")
+
+        preds = predict(
+            self.model_, X,
+            batch_size=self.batch_size,
+            device=self.device_,
+        )
+
+        # Squeeze if single output
+        if preds.shape[1] == 1 and self.output_dim_ == 1:
+            preds = preds.ravel()
+
+        return preds
+
+    def __repr__(self) -> str:
+        return f"CNNRegressor(channels={self.channels}, kernel_size={self.kernel_size})"

@@ -991,6 +991,86 @@ class PerTargetRegressor(BaseEstimator, RegressorMixin):
         return f"PerTargetRegressor(n_targets={self.n_targets})"
 
 
+def optimize_cnn(
+    X: np.ndarray,
+    y: np.ndarray,
+    cv: int = 5,
+    n_trials: int = 20,
+    epochs: int = 30,
+    verbose: bool = False,
+) -> Tuple[Dict[str, Any], float]:
+    """Optimize CNN hyperparameters using Optuna.
+
+    Args:
+        X: Feature matrix
+        y: Target matrix
+        cv: Number of CV folds
+        n_trials: Number of optimization trials
+        epochs: Training epochs per trial
+        verbose: Whether to print training progress
+
+    Returns:
+        Tuple of (best_params, best_score)
+    """
+    if not OPTUNA_AVAILABLE:
+        raise ImportError("Optuna is required for optimization")
+
+    from src.models.deep_learning import CNNRegressor
+
+    # Calculate max layers based on input dimension
+    # Each MaxPool1d(4) reduces dimension by 4x
+    # We need output_size >= 1, so max_layers = floor(log4(input_dim))
+    import math
+    input_dim = X.shape[1]
+    max_layers = max(1, int(math.log(input_dim, 4)))  # Ensure at least 1 layer
+
+    def objective(trial):
+        # Limit n_layers based on input dimension
+        n_layers = trial.suggest_int("n_layers", 1, min(max_layers, 3))
+        channels = []
+        for i in range(n_layers):
+            ch = trial.suggest_categorical(f"channels_{i}", [16, 32, 64, 128])
+            channels.append(ch)
+
+        kernel_size = trial.suggest_categorical("kernel_size", [3, 5, 7, 9])
+        dropout = trial.suggest_float("dropout", 0.1, 0.5)
+        learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
+        batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
+
+        model = CNNRegressor(
+            channels=channels,
+            kernel_size=kernel_size,
+            dropout=dropout,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            weight_decay=1e-4,
+            patience=10,
+            verbose=verbose,
+        )
+
+        try:
+            # Use cross_val_score for evaluation with error handling
+            scores = cross_val_score(model, X, y, cv=cv, scoring="neg_root_mean_squared_error")
+            return -scores.mean()
+        except Exception:
+            # Return a large penalty if model fails (e.g., invalid architecture)
+            return 1e10
+
+    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    # Extract best params and rebuild channels list
+    best_params = study.best_params.copy()
+    n_layers = best_params.pop("n_layers")
+    channels = [best_params.pop(f"channels_{i}") for i in range(n_layers)]
+    best_params["channels"] = channels
+
+    return best_params, study.best_value
+
+
 def optimize_all_models(
     X: np.ndarray,
     y: np.ndarray,
@@ -1031,6 +1111,8 @@ def optimize_all_models(
                 params, score = optimize_elastic_net(X, y, cv=cv, n_trials=n_trials)
             elif model_name == "rf":
                 params, score = optimize_rf(X, y, cv=cv, n_trials=n_trials)
+            elif model_name == "cnn":
+                params, score = optimize_cnn(X, y, cv=cv, n_trials=n_trials)
             else:
                 print(f"  Skipping unknown model: {model_name}")
                 continue
