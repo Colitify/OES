@@ -47,19 +47,26 @@ def evaluate_model(
     X: np.ndarray,
     y: np.ndarray,
     cv: int = 5,
-    target_names: Optional[List[str]] = None
+    target_names: Optional[List[str]] = None,
+    pred_transform=None,
+    y_true: Optional[np.ndarray] = None,
 ) -> Tuple[Dict[str, Dict[str, float]], np.ndarray]:
     """Comprehensive model evaluation with cross-validation.
 
     Args:
         model: Sklearn-compatible model
         X: Feature matrix
-        y: Target matrix
+        y: Target matrix (may be transformed, e.g. logit-space)
         cv: Number of cross-validation folds
         target_names: Names of target variables
+        pred_transform: Optional callable applied to cross_val_predict output
+            before computing metrics (e.g. logit inverse transform).
+        y_true: Ground-truth targets in original space. When provided, metrics
+            are computed against y_true instead of y. Required when y has been
+            transformed and pred_transform is supplied.
 
     Returns:
-        Tuple of (metrics_dict, predictions)
+        Tuple of (metrics_dict, predictions_in_original_space)
 
     Notes:
         - This function does NOT clip negative predictions by default.
@@ -67,21 +74,30 @@ def evaluate_model(
     """
     y_pred = cross_val_predict(model, X, y, cv=cv)
 
-    if y.ndim == 1:
-        y = y.reshape(-1, 1)
+    # Inverse-transform predictions if requested (e.g. logit → wt%)
+    if pred_transform is not None:
+        y_pred = pred_transform(y_pred)
+
+    # Use original-space ground truth for metrics when y was transformed
+    y_for_metrics = y_true if y_true is not None else y
+
+    if y_for_metrics.ndim == 1:
+        y_for_metrics = y_for_metrics.reshape(-1, 1)
+        y_pred = y_pred.reshape(-1, 1)
+    elif y_pred.ndim == 1:
         y_pred = y_pred.reshape(-1, 1)
 
-    n_targets = y.shape[1]
+    n_targets = y_for_metrics.shape[1]
     if target_names is None:
         target_names = [f"Target_{i}" for i in range(n_targets)]
 
     metrics: Dict[str, Dict[str, float]] = {}
     for i, name in enumerate(target_names):
         metrics[name] = {
-            "RMSE": float(np.sqrt(mean_squared_error(y[:, i], y_pred[:, i]))),
-            "MAE": float(mean_absolute_error(y[:, i], y_pred[:, i])),
-            "R2": float(r2_score(y[:, i], y_pred[:, i])),
-            "MAPE": float(np.mean(np.abs((y[:, i] - y_pred[:, i]) / (y[:, i] + 1e-8))) * 100.0),
+            "RMSE": float(np.sqrt(mean_squared_error(y_for_metrics[:, i], y_pred[:, i]))),
+            "MAE": float(mean_absolute_error(y_for_metrics[:, i], y_pred[:, i])),
+            "R2": float(r2_score(y_for_metrics[:, i], y_pred[:, i])),
+            "MAPE": float(np.mean(np.abs((y_for_metrics[:, i] - y_pred[:, i]) / (y_for_metrics[:, i] + 1e-8))) * 100.0),
         }
 
     metrics = _add_overall_metrics(metrics)

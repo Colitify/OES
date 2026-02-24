@@ -116,6 +116,90 @@ def select_wavelengths(
     return np.sort(indices)
 
 
+def select_wavelengths_sdvs(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_per_element: int = 500,
+    n_bins: int = 10,
+) -> np.ndarray:
+    """Select wavelengths using SDVS (Spectral Discriminant Variable Selection).
+
+    Adapted from the SIA team (2nd place, LIBS 2022 competition) for single-
+    measurement data.  The original SDVS uses repeat measurements to estimate
+    within-class scatter; here, quantile bins over each target provide a
+    pseudo-class approximation.
+
+    For each target y_k, channels are scored by:
+        SDVS_k = Sb_k / (Sw_k + eps)
+    where Sb is the inter-class (between-bin) variance weighted by bin size,
+    and Sw is the mean within-bin variance.  The per-channel score is averaged
+    across targets.  The top-n SDVS indices are intersected with the top-n
+    correlation indices; if the intersection is too small (<50 features), the
+    union is used instead.
+
+    Args:
+        X: Spectra matrix (n_samples, n_wavelengths)
+        y: Target matrix (n_samples, n_targets) or (n_samples,)
+        n_per_element: Number of top wavelengths to keep per element
+            (before merging).
+        n_bins: Number of quantile bins used as pseudo-classes.
+
+    Returns:
+        Sorted array of selected wavelength indices.
+    """
+    if y.ndim == 1:
+        y = y.reshape(-1, 1)
+
+    n_samples, n_wavelengths = X.shape
+    n_targets = y.shape[1]
+    eps = 1e-10
+
+    sdvs_scores = np.zeros(n_wavelengths)
+    corr_scores = np.zeros(n_wavelengths)
+
+    for k in range(n_targets):
+        yk = y[:, k]
+
+        # --- SDVS via quantile bins ---
+        bin_edges = np.quantile(yk, np.linspace(0, 1, n_bins + 1))
+        bin_edges[-1] += 1e-6  # include the max value in the last bin
+        bin_ids = np.digitize(yk, bin_edges[1:-1])  # 0 … n_bins-1
+
+        overall_mean = X.mean(axis=0)
+        sb = np.zeros(n_wavelengths)
+        sw = np.zeros(n_wavelengths)
+
+        for b in range(n_bins):
+            mask = bin_ids == b
+            if mask.sum() < 2:
+                continue
+            Xb = X[mask]
+            bin_mean = Xb.mean(axis=0)
+            sb += mask.sum() * (bin_mean - overall_mean) ** 2
+            sw += Xb.var(axis=0) * mask.sum()
+
+        sb /= n_samples
+        sw /= n_samples
+        sdvs_k = sb / (sw + eps)
+        sdvs_scores += sdvs_k
+
+        # --- Correlation score ---
+        corr_scores += np.abs(_correlation_column_wise(X, yk))
+
+    sdvs_scores /= n_targets
+    corr_scores /= n_targets
+
+    # Top-n by SDVS and by correlation
+    top_sdvs = set(np.argsort(sdvs_scores)[-n_per_element:].tolist())
+    top_corr = set(np.argsort(corr_scores)[-n_per_element:].tolist())
+
+    selected = top_sdvs & top_corr
+    if len(selected) < 50:
+        selected = top_sdvs | top_corr
+
+    return np.sort(np.array(list(selected), dtype=int))
+
+
 class FeatureExtractor(BaseEstimator, TransformerMixin):
     """Feature extraction and dimensionality reduction for spectral data."""
 
@@ -123,7 +207,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self,
         method: Literal["pca", "pls", "wavelength_selection", "none"] = "pca",
         n_components: int = 50,
-        selection_method: Literal["correlation", "variance", "f_score"] = "correlation"
+        selection_method: Literal["correlation", "variance", "f_score", "sdvs"] = "correlation"
     ):
         """Initialize feature extractor.
 
@@ -158,9 +242,14 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         elif self.method == "wavelength_selection":
             if y is None:
                 raise ValueError("y is required for wavelength selection")
-            self._selected_indices = select_wavelengths(
-                X, y, self.n_components, self.selection_method
-            )
+            if self.selection_method == "sdvs":
+                self._selected_indices = select_wavelengths_sdvs(
+                    X, y, n_per_element=self.n_components
+                )
+            else:
+                self._selected_indices = select_wavelengths(
+                    X, y, self.n_components, self.selection_method
+                )
 
         return self
 

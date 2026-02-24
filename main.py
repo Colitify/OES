@@ -32,6 +32,7 @@ from src.evaluation import (
     plot_prediction_comparison,
     generate_report,
 )
+from src.target_transform import LogitTargetTransformer
 import torch
 
 
@@ -95,7 +96,7 @@ def main():
     )
     parser.add_argument(
         "--selection_method", type=str, default="correlation",
-        choices=["correlation", "variance", "f_score"],
+        choices=["correlation", "variance", "f_score", "sdvs"],
         help="Wavelength selection method (used when --feature_method=wavelength_selection)"
     )
     parser.add_argument("--n_selected_wavelengths", type=int, default=500, help="Number of wavelengths to select (used when --feature_method=wavelength_selection)")
@@ -122,6 +123,19 @@ def main():
     # Per-target optimization (ML-006)
     parser.add_argument("--per_target", action="store_true", help="Train separate optimized model per target element")
 
+    # Logit target transform (ML-008)
+    parser.add_argument("--logit_transform", action="store_true", help="Apply logit transform to low-concentration targets before fitting")
+    parser.add_argument("--logit_elements", type=str, nargs="+", default=["C", "Si", "Mo", "Cu"],
+                        help="Elements to apply logit transform to (default: C Si Mo Cu)")
+
+    # CNN weighted loss + augmentation (ML-009)
+    parser.add_argument("--cnn_weighted_loss", action="store_true",
+                        help="Enable per-element weighted MSE in Phase 1 CNN training (C:2.0, Mo:2.0, Cu:1.5, Si:1.5)")
+    parser.add_argument("--cnn_augment", action="store_true",
+                        help="Enable spectral data augmentation during CNN Phase 2 training")
+
+    # SDVS feature selection (ML-010): extend existing --selection_method choices
+    # (sdvs is already registered in FeatureExtractor; expose it here)
     args = parser.parse_args()
 
     # Fix randomness for reproducibility
@@ -199,6 +213,14 @@ def main():
     y_train = train_data.targets
     target_names = train_data.target_names
 
+    # ML-008: Logit transform of low-concentration targets
+    logit_transformer = None
+    y_for_opt = y_train.copy()  # original targets for preprocessing/stage-1 optimization
+    if args.logit_transform:
+        logit_transformer = LogitTargetTransformer(elements=args.logit_elements)
+        y_train = logit_transformer.fit_transform(y_train, target_names)
+        print(f"  Logit transform applied to: {args.logit_elements}")
+
     # Include CNN in models if requested
     include_deep = args.model == "cnn" or args.model == "all"
     models = get_traditional_models(n_targets=train_data.n_targets, include_deep=include_deep)
@@ -256,7 +278,7 @@ def main():
             best_model_name = f"ensemble_{args.ensemble_method}"
 
     elif args.model == "all":
-        comparison_df = compare_models(models, X_train_feat, y_train, cv=args.cv, target_names=target_names)
+        comparison_df = compare_models(models, X_train_feat, y_for_opt, cv=args.cv, target_names=target_names)
         print("\nModel Comparison:")
         print(comparison_df.to_string())
         comparison_df.to_csv(output_dir / "model_comparison.csv", index=False)
@@ -292,7 +314,7 @@ def main():
 
                 stage1_params, stage1_score = optimize_preprocessing_and_features(
                     train_data.spectra,
-                    y_train,
+                    y_for_opt,  # use original targets for preprocessing optimization
                     n_components_range=(args.n_components_min, args.n_components_max),
                     n_wavelengths_range=(args.n_selected_min, args.n_selected_max),
                     cv=args.cv,
@@ -373,7 +395,7 @@ def main():
 
                 stage1_params, stage1_score = optimize_preprocessing_only(
                     train_data.spectra,
-                    y_train,
+                    y_for_opt,  # use original targets for preprocessing optimization
                     n_components_range=(args.n_components_min, args.n_components_max),
                     cv=args.cv,
                     n_trials=args.n_trials,
@@ -409,11 +431,13 @@ def main():
                 print(f"\n  Stage 2: Optimizing {best_model_name} hyperparameters (full data)...")
                 best_params, stage2_score = optimize_model_only(
                     X_train,  # Preprocessed with optimal params
-                    y_train,
+                    y_train,  # may be logit-transformed
                     model_name=best_model_name,
                     n_components=opt_n_components,
                     cv=args.cv,
                     n_trials=args.n_trials,
+                    inverse_transform=logit_transformer.inverse_transform if logit_transformer else None,
+                    y_true=y_for_opt if logit_transformer else None,
                 )
                 print(f"  Stage 2 Best RMSE: {stage2_score:.4f}")
                 print(f"  Stage 2 params: {best_params}")
@@ -512,6 +536,16 @@ def main():
         from src.models.traditional import get_model_with_params
         best_model = get_model_with_params(best_model_name, best_params, train_data.n_targets)
 
+    # ML-009: Apply CNN weighted loss / augmentation flags if CNN model selected
+    if "cnn" in best_model_name.lower():
+        from src.models.deep_learning import CNNRegressor
+        if isinstance(best_model, CNNRegressor):
+            if args.cnn_weighted_loss:
+                best_model.element_weights = {"C": 2.0, "Mo": 2.0, "Cu": 1.5, "Si": 1.5}
+                best_model.target_names = target_names
+            if args.cnn_augment:
+                best_model.augment = True
+
     # Train final model
     print(f"\n  Training {best_model_name}...")
     best_model = train_traditional_model(best_model, X_train_feat, y_train)
@@ -522,14 +556,19 @@ def main():
 
     # 5. Evaluate
     print("\n[5/5] Evaluation...")
-    metrics, y_pred = evaluate_model(best_model, X_train_feat, y_train, cv=args.cv, target_names=target_names)
+    metrics, y_pred = evaluate_model(
+        best_model, X_train_feat, y_train,
+        cv=args.cv, target_names=target_names,
+        pred_transform=logit_transformer.inverse_transform if logit_transformer else None,
+        y_true=y_for_opt if logit_transformer else None,
+    )
 
     report = generate_report(metrics, best_model_name, str(output_dir / "evaluation_report.txt"))
     print(report)
 
-    # Plot predictions
+    # Plot predictions (always in original wt% space)
     fig = plot_prediction_comparison(
-        y_train, y_pred, target_names,
+        y_for_opt, y_pred, target_names,
         save_path=str(output_dir / "figures" / "predictions.png")
     )
     print(f"  Saved prediction plot to {output_dir / 'figures' / 'predictions.png'}")
