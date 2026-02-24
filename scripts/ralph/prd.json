@@ -190,6 +190,20 @@
       "priority": 14,
       "passes": true,
       "notes": "RMSE_mean improved 2.667 → 2.403 (10.0% vs ML-013, 15.7% vs ML-012). ANN+NIST excels at Mn/Mo/Ni/Cu/Fe; Cr weaker than hybrid. per_target_RMSE_mean=2.036. Best params: C=hidden_size=5,alpha=6.60; Si=hidden_size=15,alpha=3e-4; Ni and Fe show large gains. CURRENT BEST."
+    },
+    {
+      "id": "ML-016",
+      "title": "Hybrid ANN+Ridge routing: Cr→Ridge+PCA, others→ANN+NIST",
+      "acceptanceCriteria": [
+        "CLI: --model ann_hybrid --per_target --n_trials 20 --n_per_target 50",
+        "model_map={'Cr': 'ridge'}, eff_model_name='ann' in main.py ann_hybrid branch",
+        "X_combined = hstack([X_pca, X_nist]), n_pca_cols set correctly",
+        "Cr RMSE improves vs ML-014 (6.118); overall RMSE_mean improves vs ML-014 (2.403)",
+        "guardrail PASS (tol 0.05 vs baseline 2.403)"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "RMSE_mean improved 2.403 → 2.282 (5.1%), per_target_RMSE_mean 2.036 → 1.941 (4.7%). Cr fixed: 6.118 → 5.145 (-16%), all other elements unchanged (same ANN+NIST). model_map={'Cr':'ridge'}, eff_model_name='ann'. CURRENT BEST."
     }
   ]
 }

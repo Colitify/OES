@@ -53,8 +53,8 @@ def main():
         "--model",
         type=str,
         default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "hybrid", "ann", "all"],
-        help="Model to train (cnn = 1D-CNN, xgb = XGBoost, hybrid = per-element Ridge/XGBoost, ann = NIST+ANN ensemble)",
+        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "hybrid", "ann", "ann_hybrid", "all"],
+        help="Model to train (cnn = 1D-CNN, xgb = XGBoost, hybrid = per-element Ridge/XGBoost, ann = NIST+ANN ensemble, ann_hybrid = ANN+NIST for all except Cr→Ridge+PCA)",
     )
     parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
     parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
@@ -303,8 +303,32 @@ def main():
             feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
             print(f"  [ANN] X_nist={X_nist.shape}")
 
+        elif args.model == "ann_hybrid":
+            # ML-016: ANN+NIST for all elements except Cr which reverts to Ridge+PCA
+            # Cr degrades with ANN (5.56→6.12), all others benefit from ANN
+            print("  [ANN-Hybrid] Building combined PCA+NIST feature matrix...")
+            fe_nist = FeatureExtractor(
+                method="wavelength_selection",
+                selection_method="nist",
+                wavelengths=train_data.wavelengths,
+            )
+            X_nist = fe_nist.fit_transform(X_train, y_train)
+            n_pca_cols = X_train_feat.shape[1]
+            X_train_for_model = np.hstack([X_train_feat, X_nist])
+            feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
+            # Only Cr uses Ridge+PCA; all other 7 elements default to ANN+NIST
+            model_map = {"Cr": "ridge"}
+            print(f"  [ANN-Hybrid] X_pca={X_train_feat.shape}, X_nist={X_nist.shape}, "
+                  f"X_combined={X_train_for_model.shape}")
+            print(f"  [ANN-Hybrid] Routing: Cr→Ridge+PCA, others→ANN+NIST")
+
         # Fallback model_name for elements not in model_map
-        eff_model_name = "ridge" if args.model == "hybrid" else args.model
+        if args.model == "hybrid":
+            eff_model_name = "ridge"
+        elif args.model == "ann_hybrid":
+            eff_model_name = "ann"
+        else:
+            eff_model_name = args.model
 
         per_target_models, per_target_params, per_target_scores, per_element_indices = optimize_per_target(
             X_train_for_model, y_train,
