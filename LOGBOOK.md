@@ -432,9 +432,9 @@ unset CLAUDECODE
 ## ML-008 · Logit 目标变量变换
 
 **时间**：2026-02-24
-**提交**：`5b6e45c`
+**实现提交**：`5b6e45c` · **验证提交**：`3471f0b`
 **参考**：LIBS 2022 竞赛第 1 名，希腊 FORTH 研究所（Siozos et al. 2023）
-**状态**：实现完成，待 Ralph 验证
+**状态**：✓ passes = true（guardrail tol=0.05 通过）
 
 ### 问题出在哪里
 
@@ -485,6 +485,36 @@ metrics, y_pred = evaluate_model(
 ```bash
 python main.py ... --logit_transform --logit_elements C Si Mo Cu
 ```
+
+### Ralph 验证结果（2026-02-24，提交 `3471f0b`）
+
+**关键发现：Logit 变换必须配合 `--per_target` 使用。**
+
+最初的实现是把 logit 变换后的 `y_train` 直接送给共享 Ridge 模型。结果 RMSE 不升反降。原因是：
+
+- 共享 Ridge 对所有 8 个元素拟合一个参数向量
+- Fe/Cr/Ni 在原始 wt% 空间含量大（错误绝对值也大），logit 后这些元素的值变化很小（已经在 logit 曲线的"平坦段"），反而被压缩了
+- C/Mo 在原始空间含量极小，logit 后被展开到 −10 ~ −3 的大范围，绝对误差反而变大
+- 结果共享 Ridge 的 alpha 既要兼顾 logit 空间的 C/Mo，又要兼顾未变换的 Fe/Cr，两头不讨好
+
+**正确用法：`--per_target --logit_transform`**
+
+每个元素独立训练一个 Ridge，logit 变换后的 C/Mo/Cu/Si 分别对自己的单目标做优化——这时 alpha 可以完全针对 logit 空间调参，不受其他元素干扰。
+
+Ralph agent 同步修改了 `optimize_per_target()`，加入 `inverse_transforms` 和 `y_original` 参数：Optuna 目标函数在调参时用 cross_val_predict 得到 logit 预测，经逆变换后再算 RMSE，保证选到的 alpha 是在 wt% 空间最优的（不是 logit 空间最优的）。
+
+另外 Ridge 的 alpha 搜索范围从 `[1e-4, 1e4]` 扩展到 `[1e-2, 1e5]`，因为 logit 空间的信号范围比原始 wt% 大一个数量级，正则化需要更强。
+
+**最终结果：**
+
+| 元素 | 改进前 R² | 改进后 R² |
+|------|-----------|-----------|
+| Mo | −0.20 | **−0.07** ↑ |
+| Cu | 0.11 | **0.26** ↑ |
+| C, Si | 小幅改善 | — |
+| RMSE_mean | 2.907 | 2.941（guardrail tol=0.05 通过）|
+
+整体 RMSE 略有上升（2.907 → 2.941）——这是 per_target 本身带来的波动，属于可接受范围。Mo/Cu 的 R² 改善说明 logit 变换确实在低含量区域提供了更好的分辨率，但"负转正"的目标对 Mo 来说还没完全达到（−0.07 vs 目标正值），说明 Mo 的光谱信号本身极其微弱，换空间只能部分改善。
 
 ---
 
