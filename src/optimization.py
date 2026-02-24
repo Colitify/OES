@@ -851,6 +851,7 @@ def optimize_per_target(
     wavelengths: Optional[np.ndarray] = None,
     model_map: Optional[Dict[str, str]] = None,
     n_pca_cols: int = 0,
+    n_ann_ensemble: int = 16,
 ) -> Tuple[list, Dict[str, Dict[str, Any]], Dict[str, float]]:
     """Optimize model hyperparameters separately for each target.
 
@@ -918,7 +919,7 @@ def optimize_per_target(
 
         # Compute column slice in X (X may be X_combined = hstack([X_pca, X_nist]))
         col_slice = None
-        if elem_model == "xgb" and wavelengths is not None:
+        if elem_model in ("xgb", "ann") and wavelengths is not None:
             from src.features import select_wavelengths_nist, NIST_EMISSION_LINES
             if target_name in NIST_EMISSION_LINES:
                 nist_local = select_wavelengths_nist(wavelengths, [target_name], delta_nm=1.0)
@@ -938,7 +939,7 @@ def optimize_per_target(
         print(f"    Model: {elem_model}, X_fit shape: {X_fit.shape}")
 
         def objective(trial, _y=y_single, _inv=inv_fn, _y_orig=y_orig_single,
-                      _X=X_fit, _model_type=elem_model):
+                      _X=X_fit, _model_type=elem_model, _n_ens=n_ann_ensemble):
             if _model_type == "ridge":
                 alpha = trial.suggest_float("alpha", 1e-2, 1e5, log=True)
                 model = Ridge(alpha=alpha)
@@ -974,6 +975,27 @@ def optimize_per_target(
                 device = "cuda" if _cuda_ok() else "cpu"
                 model = XGBRegressor(**xgb_params, tree_method="hist", device=device,
                                      n_jobs=-1, verbosity=0, random_state=42)
+            elif _model_type == "ann":
+                from sklearn.neural_network import MLPRegressor
+                from sklearn.ensemble import BaggingRegressor
+                hidden_size = trial.suggest_int("hidden_size", 5, 50)
+                alpha = trial.suggest_float("alpha", 1e-5, 10.0, log=True)
+                base_ann = MLPRegressor(
+                    hidden_layer_sizes=(hidden_size,),
+                    activation="logistic",
+                    solver="lbfgs",
+                    alpha=alpha,
+                    max_iter=2000,
+                    random_state=42,
+                )
+                model = BaggingRegressor(
+                    estimator=base_ann,
+                    n_estimators=_n_ens,
+                    max_samples=1.0,
+                    bootstrap=True,
+                    n_jobs=-1,
+                    random_state=42,
+                )
             else:
                 raise ValueError(f"Unknown model: {_model_type}")
 
@@ -1009,6 +1031,25 @@ def optimize_per_target(
             device = "cuda" if _cuda_ok() else "cpu"
             model = XGBRegressor(**best_params, tree_method="hist", device=device,
                                  n_jobs=-1, verbosity=0, random_state=42)
+        elif elem_model == "ann":
+            from sklearn.neural_network import MLPRegressor
+            from sklearn.ensemble import BaggingRegressor
+            base_ann = MLPRegressor(
+                hidden_layer_sizes=(best_params["hidden_size"],),
+                activation="logistic",
+                solver="lbfgs",
+                alpha=best_params["alpha"],
+                max_iter=2000,
+                random_state=42,
+            )
+            model = BaggingRegressor(
+                estimator=base_ann,
+                n_estimators=n_ann_ensemble,
+                max_samples=1.0,
+                bootstrap=True,
+                n_jobs=-1,
+                random_state=42,
+            )
         else:
             raise ValueError(f"Unknown model: {elem_model}")
 

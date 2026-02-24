@@ -161,6 +161,35 @@
       "priority": 12,
       "passes": true,
       "notes": "RMSE_mean improved from 2.901 to 2.850 (1.8%). Hybrid routing: C/Si/Mo/Cu → XGBoost+NIST (low-concentration, non-linear), Cr/Fe/Ni/Mn → Ridge+PCA (high-concentration, linear). Per-element: C=0.94, Si=0.42, Mn=0.64, Cr=5.56, Mo=1.14, Ni=5.17, Cu=0.44, Fe=8.50."
+    },
+    {
+      "id": "ML-013",
+      "title": "Per-target aggregation evaluation (GroupKFold + 50-spectra averaging)",
+      "acceptanceCriteria": [
+        "make_target_groups() and aggregate_per_target() in src/evaluation.py",
+        "evaluate_model() supports n_per_target parameter with GroupKFold",
+        "main.py --n_per_target 50 flag",
+        "predict.py supports --n_per_target for inference",
+        "metrics JSON reports per_target_RMSE_mean as secondary metric",
+        "per-spectrum RMSE_mean does not regress vs ML-012 (2.850)"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "RMSE_mean improved 2.850 → 2.667 (6.5%). GroupKFold prevents same-target leakage; forces better generalization during per-target hyperparameter search. per_target_RMSE_mean=2.278. Per-element: C=0.929, Si=0.395, Mn=0.548, Cr=5.145, Mo=0.760, Ni=4.973, Cu=0.272, Fe=8.316."
+    },
+    {
+      "id": "ML-014",
+      "title": "Small ANN + NIST per-element ensemble (FORTH team replication)",
+      "acceptanceCriteria": [
+        "MLPRegressor(hidden_layer_sizes=(N,), solver='lbfgs') in optimize_per_target 'ann' case",
+        "BaggingRegressor(n_estimators=16) as ensemble wrapper",
+        "Per-element NIST channel routing extends to 'ann' (in addition to 'xgb')",
+        "CLI: --model ann --per_target --n_ann_ensemble 16",
+        "RMSE_mean improves vs ML-012 baseline 2.850 (guardrail PASS)"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "RMSE_mean improved 2.667 → 2.403 (10.0% vs ML-013, 15.7% vs ML-012). ANN+NIST excels at Mn/Mo/Ni/Cu/Fe; Cr weaker than hybrid. per_target_RMSE_mean=2.036. Best params: C=hidden_size=5,alpha=6.60; Si=hidden_size=15,alpha=3e-4; Ni and Fe show large gains. CURRENT BEST."
     }
   ]
 }

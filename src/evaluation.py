@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import cross_val_predict
+from sklearn.model_selection import cross_val_predict, GroupKFold
 from typing import Optional, Dict, List, Tuple, Any
 from pathlib import Path
 
@@ -42,6 +42,26 @@ def _add_overall_metrics(metrics: Dict[str, Dict[str, float]]) -> Dict[str, Dict
     return metrics
 
 
+def make_target_groups(n_samples: int, n_per_target: int = 50) -> np.ndarray:
+    """Create group labels for per-target GroupKFold.
+
+    Assumes data is ordered: rows 0..n-1 = target 0, rows n..2n-1 = target 1, etc.
+    """
+    n_targets = n_samples // n_per_target
+    return np.repeat(np.arange(n_targets), n_per_target)
+
+
+def aggregate_per_target(arr: np.ndarray, n_per_target: int = 50) -> np.ndarray:
+    """Average rows within each target block.
+
+    arr shape: (n_samples,) or (n_samples, n_cols) → (n_groups, ...) after averaging.
+    """
+    n_groups = len(arr) // n_per_target
+    if arr.ndim == 1:
+        return arr.reshape(n_groups, n_per_target).mean(axis=1)
+    return arr.reshape(n_groups, n_per_target, arr.shape[1]).mean(axis=1)
+
+
 def evaluate_model(
     model,
     X: np.ndarray,
@@ -50,6 +70,7 @@ def evaluate_model(
     target_names: Optional[List[str]] = None,
     pred_transform=None,
     y_true: Optional[np.ndarray] = None,
+    n_per_target: int = 0,
 ) -> Tuple[Dict[str, Dict[str, float]], np.ndarray]:
     """Comprehensive model evaluation with cross-validation.
 
@@ -64,6 +85,9 @@ def evaluate_model(
         y_true: Ground-truth targets in original space. When provided, metrics
             are computed against y_true instead of y. Required when y has been
             transformed and pred_transform is supplied.
+        n_per_target: If >0, use GroupKFold (groups = rows 0..n-1 = target 0, etc.)
+            and additionally compute per-target aggregated RMSE as a secondary metric
+            stored in metrics["_overall"]["per_target_RMSE_mean"].
 
     Returns:
         Tuple of (metrics_dict, predictions_in_original_space)
@@ -72,7 +96,12 @@ def evaluate_model(
         - This function does NOT clip negative predictions by default.
           If you want non-negative concentrations, clip outside before computing metrics.
     """
-    y_pred = cross_val_predict(model, X, y, cv=cv)
+    if n_per_target > 0:
+        groups = make_target_groups(len(X), n_per_target)
+        cv_splits = list(GroupKFold(n_splits=cv).split(X, y, groups))
+        y_pred = cross_val_predict(model, X, y, cv=cv_splits)
+    else:
+        y_pred = cross_val_predict(model, X, y, cv=cv)
 
     # Inverse-transform predictions if requested (e.g. logit → wt%)
     if pred_transform is not None:
@@ -101,6 +130,19 @@ def evaluate_model(
         }
 
     metrics = _add_overall_metrics(metrics)
+
+    # Secondary metric: per-target aggregated RMSE (50-spectra averaging)
+    if n_per_target > 0:
+        y_agg = aggregate_per_target(y_pred, n_per_target)
+        y_ref_agg = aggregate_per_target(y_for_metrics, n_per_target)
+        pt_rmse_list = [
+            float(np.sqrt(mean_squared_error(y_ref_agg[:, i], y_agg[:, i])))
+            for i in range(n_targets)
+        ]
+        metrics["_overall"]["per_target_RMSE_mean"] = float(np.mean(pt_rmse_list))
+        metrics["_overall"]["per_target_RMSE_std"] = float(np.std(pt_rmse_list))
+        metrics["_overall"]["per_target_n"] = n_per_target
+
     return metrics, y_pred
 
 

@@ -53,8 +53,8 @@ def main():
         "--model",
         type=str,
         default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "hybrid", "all"],
-        help="Model to train (cnn = 1D-CNN, xgb = XGBoost, hybrid = per-element Ridge/XGBoost)",
+        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "hybrid", "ann", "all"],
+        help="Model to train (cnn = 1D-CNN, xgb = XGBoost, hybrid = per-element Ridge/XGBoost, ann = NIST+ANN ensemble)",
     )
     parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
     parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
@@ -136,6 +136,16 @@ def main():
 
     # SDVS feature selection (ML-010): extend existing --selection_method choices
     # (sdvs is already registered in FeatureExtractor; expose it here)
+
+    # Per-target aggregation evaluation (ML-013)
+    parser.add_argument("--n_per_target", type=int, default=0,
+        help="If >0, use GroupKFold + per-target aggregation in evaluation "
+             "(set to 50 for this dataset: 50 spectra per target)")
+
+    # ANN ensemble (ML-014)
+    parser.add_argument("--n_ann_ensemble", type=int, default=16,
+        help="Number of ANN models in ensemble for --model ann (default 16, like FORTH)")
+
     args = parser.parse_args()
 
     # Fix randomness for reproducibility
@@ -280,6 +290,19 @@ def main():
             elif args.feature_method == "none":
                 feat_wavelengths = train_data.wavelengths
 
+        elif args.model == "ann":
+            # ANN (FORTH replication): NIST features, per-element channel routing, BaggingRegressor
+            print("  [ANN] Building NIST feature columns for per-element ANN...")
+            fe_nist = FeatureExtractor(
+                method="wavelength_selection",
+                selection_method="nist",
+                wavelengths=train_data.wavelengths,
+            )
+            X_nist = fe_nist.fit_transform(X_train, y_train)
+            X_train_for_model = X_nist
+            feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
+            print(f"  [ANN] X_nist={X_nist.shape}")
+
         # Fallback model_name for elements not in model_map
         eff_model_name = "ridge" if args.model == "hybrid" else args.model
 
@@ -294,6 +317,7 @@ def main():
             wavelengths=feat_wavelengths,
             model_map=model_map,
             n_pca_cols=n_pca_cols,
+            n_ann_ensemble=args.n_ann_ensemble,
         )
 
         best_model = PerTargetRegressor(
@@ -620,6 +644,7 @@ def main():
         cv=args.cv, target_names=target_names,
         pred_transform=logit_transformer.inverse_transform if logit_transformer else None,
         y_true=y_for_opt if logit_transformer else None,
+        n_per_target=args.n_per_target,
     )
 
     report = generate_report(metrics, best_model_name, str(output_dir / "evaluation_report.txt"))
@@ -647,6 +672,8 @@ def main():
                 if per_target_rmse:
                     rmse_mean = float(np.mean(per_target_rmse))
 
+        per_target_rmse_mean = metrics.get("_overall", {}).get("per_target_RMSE_mean") if isinstance(metrics, dict) else None
+
         payload = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "git_sha": get_git_sha(),
@@ -654,6 +681,7 @@ def main():
             "cv_folds": args.cv,
             "seed": args.seed,
             "primary_metric": {"name": "RMSE_mean", "value": rmse_mean},
+            "per_target_rmse_mean": per_target_rmse_mean,
             "metrics": metrics,
             "pipeline": {
                 "preprocess": {
