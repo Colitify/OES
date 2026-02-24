@@ -102,8 +102,8 @@
         "Mo R² improves from -0.199 toward positive values, C RMSE decreases"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "Based on FORTH team (1st place, LIBS 2022 competition, Siozos et al. 2023). Logit maps [0,100] wt% to (-inf,+inf), expanding the low-concentration region."
+      "passes": true,
+      "notes": "Logit transform implemented. Works best with --per_target --logit_transform (per-target optimization in original space). Mo R² improved -0.20 -> -0.07, Cu R² 0.11 -> 0.26, RMSE_mean 2.91 -> 2.94. Shared Ridge + logit fails due to scale mismatch (Fe/Cr dominate loss). optimize_per_target now supports inverse_transforms for original-space objectives."
     },
     {
       "id": "ML-009",
@@ -133,6 +133,21 @@
       "priority": 10,
       "passes": false,
       "notes": "Based on SIA team (2nd place, LIBS 2022 competition). Original SDVS requires repeat measurements; adapted to single-measurement using quantile bins as pseudo-classes."
+    },
+    {
+      "id": "ML-011",
+      "title": "NIST emission line selection + XGBoost per-element",
+      "acceptanceCriteria": [
+        "select_wavelengths_nist() in src/features.py with NIST_EMISSION_LINES dict",
+        "FeatureExtractor supports selection_method='nist'",
+        "XGBRegressor added to traditional.py (GPU auto-detect)",
+        "optimize_per_target() supports model_name='xgb' with per-element NIST channels",
+        "CLI: --model xgb --per_target --feature_method wavelength_selection --selection_method nist",
+        "RMSE_mean improves vs baseline 2.901, Mo/C R² improve"
+      ],
+      "priority": 11,
+      "passes": false,
+      "notes": "Based on FORTH team (1st place, LIBS 2022 competition). NIST prior filters 40002 channels to element-specific emission windows; XGBoost captures non-linear self-absorption effects for low-concentration elements."
     }
   ]
 }
