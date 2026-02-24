@@ -838,6 +838,8 @@ def optimize_per_target(
     target_names: Optional[list] = None,
     cv: int = 5,
     n_trials: int = 20,
+    inverse_transforms: Optional[Dict[str, Callable]] = None,
+    y_original: Optional[np.ndarray] = None,
 ) -> Tuple[list, Dict[str, Dict[str, Any]], Dict[str, float]]:
     """Optimize model hyperparameters separately for each target.
 
@@ -847,10 +849,15 @@ def optimize_per_target(
 
     Args:
         X: Feature matrix
-        y: Target matrix (n_samples, n_targets)
+        y: Target matrix (n_samples, n_targets), may be transformed (e.g. logit)
         model_name: Model to optimize ("ridge", "lasso", "pls", "rf")
         target_names: Names of targets for reporting
         cv: Number of CV folds
+        inverse_transforms: Optional dict mapping target_name -> inverse_transform callable.
+            When provided for a target, the optimization objective is computed in
+            original space (inverse_transform applied before RMSE).
+        y_original: Original (untransformed) targets; required when inverse_transforms
+            is provided.
         n_trials: Number of Optuna trials per target
 
     Returns:
@@ -873,13 +880,17 @@ def optimize_per_target(
     params_per_target = {}
     scores_per_target = {}
 
+    from sklearn.model_selection import cross_val_predict as _cvp
+
     for i, target_name in enumerate(target_names):
         print(f"\n  Optimizing for target: {target_name} ({i+1}/{n_targets})")
         y_single = y[:, i]
+        inv_fn = (inverse_transforms or {}).get(target_name)
+        y_orig_single = y_original[:, i] if (inv_fn is not None and y_original is not None) else None
 
-        def objective(trial):
+        def objective(trial, _y=y_single, _inv=inv_fn, _y_orig=y_orig_single):
             if model_name == "ridge":
-                alpha = trial.suggest_float("alpha", 1e-4, 1e4, log=True)
+                alpha = trial.suggest_float("alpha", 1e-2, 1e5, log=True)
                 model = Ridge(alpha=alpha)
             elif model_name == "lasso":
                 alpha = trial.suggest_float("alpha", 1e-6, 1e2, log=True)
@@ -901,8 +912,14 @@ def optimize_per_target(
             else:
                 raise ValueError(f"Unknown model: {model_name}")
 
-            scores = cross_val_score(model, X, y_single, cv=cv, scoring="neg_root_mean_squared_error")
-            return -scores.mean()
+            if _inv is not None and _y_orig is not None:
+                # Compute RMSE in original space (e.g., after inverse logit)
+                y_pred_trans = _cvp(model, X, _y, cv=cv)
+                y_pred_orig = _inv(y_pred_trans)
+                return float(np.sqrt(np.mean((_y_orig - y_pred_orig) ** 2)))
+            else:
+                scores = cross_val_score(model, X, _y, cv=cv, scoring="neg_root_mean_squared_error")
+                return -scores.mean()
 
         study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42 + i))
         with warnings.catch_warnings():

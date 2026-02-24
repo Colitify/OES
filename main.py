@@ -233,12 +233,23 @@ def main():
 
         from src.optimization import optimize_per_target, PerTargetRegressor
 
+        # Build per-target inverse transforms for logit elements so optimization
+        # is performed in original space (prevents error amplification by inverse logit).
+        per_target_inv = None
+        if logit_transformer is not None and logit_transformer._transform_mask is not None:
+            per_target_inv = {}
+            for idx, tname in enumerate(target_names):
+                if logit_transformer._transform_mask[idx]:
+                    per_target_inv[tname] = lambda yp: 100.0 / (1.0 + np.exp(-yp))
+
         per_target_models, per_target_params, per_target_scores = optimize_per_target(
             X_train_feat, y_train,
             model_name=args.model,
             target_names=target_names,
             cv=args.cv,
             n_trials=args.n_trials,
+            inverse_transforms=per_target_inv,
+            y_original=y_for_opt if logit_transformer else None,
         )
 
         best_model = PerTargetRegressor(per_target_models, target_names=target_names)
