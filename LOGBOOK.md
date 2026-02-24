@@ -641,3 +641,67 @@ python main.py ... --feature_method wavelength_selection --selection_method sdvs
 **CNN 加权损失的跷跷板风险**：把 C/Mo 的权重调高，理论上会让 Fe/Cr 的精度略降。最终是否"总账"更好，需要实验说话。
 
 **SDVS 的 bin 数量敏感性**：n_bins=10 是经验值，bin 太少组内方差偏高（类内杂乱），bin 太多每组样本过少估计不稳定（400 样本 ÷ 10 bin = 40 个/组，边界可接受）。
+
+---
+
+## 工程优化：并行 ALS + Optuna warm-start + 100 trials
+
+**时间**：2026-02-24
+**提交**：`9f89e57`
+**结果**：RMSE_mean 2.941 → **2.901**（guardrail PASS, tol=0.05）
+
+### 背景
+
+之前每个 Optuna trial 串行跑 ALS（`scipy.sparse.linalg.spsolve`），数据集实为 2100 个样本，30% 子采样 = 630 个，每 trial 约 19 秒，100 trials 估计需要 ~32 分钟。通过以下两项改动让 100 trials 变得可行。
+
+### 改动一：ALS 并行化（`src/preprocessing.py`）
+
+`Preprocessor.transform()` 原本是一个 Python for 循环，串行处理每条光谱。
+
+```python
+# 改动前
+for i in range(X.shape[0]):
+    X_processed[i] = preprocess_spectrum(X[i], ...)
+
+# 改动后
+from joblib import Parallel, delayed
+results = Parallel(n_jobs=-1, prefer="threads")(
+    delayed(preprocess_spectrum)(X[i], ...) for i in range(X.shape[0])
+)
+return np.array(results, dtype=np.float32)
+```
+
+**为什么用 `prefer="threads"` 而不是默认进程池**：`scipy.sparse.linalg.spsolve` 通过 SuperLU C 扩展执行，会释放 Python GIL，因此线程之间可以真正并行计算，不会被 GIL 阻塞。线程池相比进程池的优势是：启动延迟接近 0（Windows 进程启动开销 ~0.5 秒/worker），且无需进程间内存拷贝。
+
+实测：400 样本全量 ALS 从串行估计的 ~50 秒降至并行 2.1 秒。
+
+### 改动二：Optuna warm-start（`src/optimization.py`）
+
+在 `optimize_preprocessing_only()` 中，`study.optimize()` 之前插入：
+
+```python
+study.enqueue_trial({
+    "baseline_lam": 416448.0,
+    "baseline_p": 0.026,
+    "savgol_window_half": 6,   # 2*6+1 = 13
+    "savgol_polyorder": 4,
+    "n_components": 86,
+})
+```
+
+把 ML-003 已知最优参数作为第 0 号 trial。TPE 采样器会在这个已知好点周围建立代理模型，后续 trial 优先探索附近区域，收敛速度更快，也避免了 100 trials 早期大量浪费在差区域。
+
+Trial 0 实际得分 2.074（子采样 RMSE），是前 10 个 trial 里最好的之一，warm-start 效果明显。
+
+### 100 trials 结果
+
+| 参数 | ML-003（20 trials） | 新结果（100 trials） |
+|------|---------------------|--------------------|
+| baseline_lam | 4.16e5 | **1.47e5** |
+| baseline_p | 0.026 | **0.049** |
+| savgol_window | 13 | **15** |
+| savgol_polyorder | 4 | 4（不变） |
+| n_components | 86 | **93** |
+| RMSE_mean（5-fold） | 2.907 | **2.901** |
+
+100 trials 找到了与 ML-003 不同方向的参数组合（baseline_p 更大、lam 更小，窗口更宽，主成分更多），RMSE 微幅提升 0.2%。改善有限说明当前优化方向（预处理参数空间）已接近天花板，后续收益应在模型结构（per-target、logit、集成）上寻找。
