@@ -400,18 +400,24 @@ def optimize_model_only(
     n_components: int = 50,
     cv: int = 5,
     n_trials: int = 30,
+    inverse_transform: Optional[Callable] = None,
+    y_true: Optional[np.ndarray] = None,
 ) -> Tuple[Dict[str, Any], float]:
     """Stage 2: Optimize only model hyperparameters.
 
-    Uses pre-processed and PCA-transformed features to tune model params.
+    Uses pre-processed spectra to tune model params (PCA applied inside).
 
     Args:
         X_preprocessed: Preprocessed spectra (after preprocessing, before PCA)
-        y: Target matrix
+        y: Target matrix (may be transformed, e.g. logit)
         model_name: Model to optimize
         n_components: Fixed PCA n_components from Stage 1
         cv: Number of CV folds
         n_trials: Number of optimization trials
+        inverse_transform: Optional callable applied to cross_val_predict output
+            before computing the objective RMSE (e.g. logit inverse).
+        y_true: Ground-truth in original scale; required when inverse_transform
+            is provided.
 
     Returns:
         Tuple of (best_model_params, best_score)
@@ -421,8 +427,21 @@ def optimize_model_only(
 
     from sklearn.decomposition import PCA
     from sklearn.pipeline import Pipeline
+    from sklearn.model_selection import cross_val_predict as _cvp
 
     print(f"  [Stage 2] Optimizing {model_name} with n_components={n_components}")
+    if inverse_transform is not None:
+        print(f"  [Stage 2] Objective computed in original (inverse-transformed) space")
+
+    def _score(model_or_pipeline, X_data, y_data):
+        """Compute RMSE, in original space if inverse_transform is provided."""
+        if inverse_transform is not None and y_true is not None:
+            y_pred = _cvp(model_or_pipeline, X_data, y_data, cv=cv)
+            y_pred_orig = inverse_transform(y_pred)
+            return float(np.sqrt(np.mean((y_true - y_pred_orig) ** 2)))
+        scores = cross_val_score(model_or_pipeline, X_data, y_data, cv=cv,
+                                  scoring="neg_root_mean_squared_error")
+        return -scores.mean()
 
     def objective(trial):
         if model_name == "ridge":
@@ -449,8 +468,7 @@ def optimize_model_only(
         elif model_name == "pls":
             pls_n = trial.suggest_int("n_components", 5, min(50, X_preprocessed.shape[0] - 1))
             model = PLSRegression(n_components=pls_n)
-            scores = cross_val_score(model, X_preprocessed, y, cv=cv, scoring="neg_root_mean_squared_error")
-            return -scores.mean()
+            return _score(model, X_preprocessed, y)
         else:
             raise ValueError(f"Unknown model: {model_name}")
 
@@ -458,9 +476,7 @@ def optimize_model_only(
             ("pca", PCA(n_components=n_components)),
             ("model", model),
         ])
-
-        scores = cross_val_score(pipeline, X_preprocessed, y, cv=cv, scoring="neg_root_mean_squared_error")
-        return -scores.mean()
+        return _score(pipeline, X_preprocessed, y)
 
     study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
     with warnings.catch_warnings():

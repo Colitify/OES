@@ -90,6 +90,49 @@
       "priority": 7,
       "passes": true,
       "notes": "CNN model added via --model cnn. With optimization (10 trials), CNN RMSE ~3.04 vs Ridge ~2.91. CNN works on CPU (auto-falls back from unsupported CUDA). Optuna tunes channels, kernel_size, dropout, learning_rate, batch_size."
+    },
+    {
+      "id": "ML-008",
+      "title": "Logit target variable transformation for low-concentration elements",
+      "acceptanceCriteria": [
+        "New src/target_transform.py with LogitTargetTransformer class",
+        "CLI flags --logit_transform and --logit_elements (default: C Si Mo Cu)",
+        "Transform applied to y_train before fitting; inverse applied before metrics",
+        "predict.py supports LOGIT_TRANSFORM=True flag",
+        "Mo R² improves from -0.199 toward positive values, C RMSE decreases"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Based on FORTH team (1st place, LIBS 2022 competition, Siozos et al. 2023). Logit maps [0,100] wt% to (-inf,+inf), expanding the low-concentration region."
+    },
+    {
+      "id": "ML-009",
+      "title": "CNN two-phase weighted loss + spectral data augmentation",
+      "acceptanceCriteria": [
+        "CNNRegressor supports element_weights dict and augment=True parameters",
+        "Phase 1 (first 1/3 epochs): up-weights C:2.0, Mo:2.0, Cu:1.5, Si:1.5",
+        "Phase 2 (remaining epochs): uniform weights",
+        "Augmentation: intensity jitter [0.65,1.35] + wavelength masking (0-50 channels)",
+        "CLI flags --cnn_weighted_loss and --cnn_augment",
+        "CNN RMSE approaches Ridge baseline (~2.91)"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "Based on DD team (3rd place, LIBS 2022 competition). Addresses the issue where low-concentration element errors are masked by Fe/Cr/Ni large absolute errors during training."
+    },
+    {
+      "id": "ML-010",
+      "title": "SDVS feature selection adapted for single-measurement LIBS data",
+      "acceptanceCriteria": [
+        "New select_wavelengths_sdvs() function in src/features.py",
+        "Uses quantile-binning approximation (n_bins=10) for within-class scatter",
+        "Registered as 'sdvs' in FeatureExtractor selection_method",
+        "CLI: --feature_method wavelength_selection --selection_method sdvs",
+        "RMSE_mean does not regress vs baseline"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Based on SIA team (2nd place, LIBS 2022 competition). Original SDVS requires repeat measurements; adapted to single-measurement using quantile bins as pseudo-classes."
     }
   ]
 }

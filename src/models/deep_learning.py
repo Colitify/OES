@@ -391,6 +391,14 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
     allowing it to be used with cross_val_predict and other sklearn utilities.
 
     Inherits from BaseEstimator and RegressorMixin for sklearn compatibility.
+
+    ML-009 additions:
+    - element_weights: per-target loss weights applied during Phase 1 training.
+      Defaults to uniform weights.  Dict maps target name to float, e.g.
+      {"C": 2.0, "Mo": 2.0, "Cu": 1.5, "Si": 1.5}.
+    - phase_split: fraction of epochs used for Phase 1 (weighted MSE).
+    - augment: if True, apply spectral augmentation during Phase 2.
+    - target_names: list of target names (needed to map element_weights to columns).
     """
 
     def __init__(
@@ -404,20 +412,11 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         weight_decay: float = 1e-4,
         patience: int = 10,
         verbose: bool = False,
+        element_weights: Optional[dict] = None,
+        phase_split: float = 0.33,
+        augment: bool = False,
+        target_names: Optional[List[str]] = None,
     ):
-        """Initialize CNN regressor.
-
-        Args:
-            channels: List of channel sizes for conv layers (default: [32, 64])
-            kernel_size: Convolution kernel size
-            dropout: Dropout rate
-            epochs: Training epochs
-            batch_size: Batch size
-            learning_rate: Learning rate
-            weight_decay: L2 regularization
-            patience: Early stopping patience
-            verbose: Whether to print training progress
-        """
         self.channels = channels if channels is not None else [32, 64]
         self.kernel_size = kernel_size
         self.dropout = dropout
@@ -427,6 +426,10 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         self.weight_decay = weight_decay
         self.patience = patience
         self.verbose = verbose
+        self.element_weights = element_weights
+        self.phase_split = phase_split
+        self.augment = augment
+        self.target_names = target_names
         self.model_ = None
         self.device_ = None
         self.input_dim_ = None
@@ -444,6 +447,10 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
             "weight_decay": self.weight_decay,
             "patience": self.patience,
             "verbose": self.verbose,
+            "element_weights": self.element_weights,
+            "phase_split": self.phase_split,
+            "augment": self.augment,
+            "target_names": self.target_names,
         }
 
     def set_params(self, **params):
@@ -451,6 +458,115 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         for key, value in params.items():
             setattr(self, key, value)
         return self
+
+    def _build_weight_tensor(self, n_targets: int, device: str) -> "torch.Tensor":
+        """Build per-target loss weight vector from element_weights dict."""
+        weights = np.ones(n_targets, dtype=np.float32)
+        if self.element_weights and self.target_names:
+            for j, name in enumerate(self.target_names):
+                if name in self.element_weights:
+                    weights[j] = float(self.element_weights[name])
+        return torch.tensor(weights, device=device)
+
+    @staticmethod
+    def _augment_batch(X_batch: "torch.Tensor") -> "torch.Tensor":
+        """Apply spectral augmentation: intensity jitter + wavelength masking."""
+        # Intensity jitter: scale each spectrum by U[0.65, 1.35]
+        scale = 0.65 + 0.70 * torch.rand(X_batch.size(0), 1, device=X_batch.device)
+        X_aug = X_batch * scale
+
+        # Wavelength masking: zero out a random contiguous block (0–50 channels)
+        n_mask = int(torch.randint(0, 51, (1,)).item())
+        if n_mask > 0 and X_aug.size(1) > n_mask:
+            start = int(torch.randint(0, X_aug.size(1) - n_mask + 1, (1,)).item())
+            X_aug[:, start:start + n_mask] = 0.0
+
+        return X_aug
+
+    def _fit_weighted(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_val: np.ndarray,
+        y_val: np.ndarray,
+    ):
+        """Two-phase training: Phase 1 weighted MSE, Phase 2 uniform MSE + augmentation."""
+        device = self.device_
+
+        X_tr = torch.FloatTensor(X_train).to(device)
+        y_tr = torch.FloatTensor(y_train).to(device)
+        X_v = torch.FloatTensor(X_val).to(device)
+        y_v = torch.FloatTensor(y_val).to(device)
+
+        from torch.utils.data import DataLoader, TensorDataset
+        train_ds = TensorDataset(X_tr, y_tr)
+        val_ds = TensorDataset(X_v, y_v)
+        train_loader = DataLoader(train_ds, batch_size=self.batch_size, shuffle=True)
+        val_loader = DataLoader(val_ds, batch_size=self.batch_size)
+
+        optimizer = torch.optim.Adam(
+            self.model_.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay,
+        )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, patience=max(1, self.patience // 2)
+        )
+
+        phase1_epochs = max(1, int(self.epochs * self.phase_split))
+        phase2_epochs = self.epochs - phase1_epochs
+
+        weight_tensor = self._build_weight_tensor(y_train.shape[1], device)
+        uniform_weight = torch.ones(y_train.shape[1], device=device)
+
+        best_val_loss = float("inf")
+        best_state = None
+        patience_counter = 0
+
+        for phase, n_ep, w_vec in [
+            (1, phase1_epochs, weight_tensor),
+            (2, phase2_epochs, uniform_weight),
+        ]:
+            for _ in range(n_ep):
+                self.model_.train()
+                for X_b, y_b in train_loader:
+                    if phase == 2 and self.augment:
+                        X_b = self._augment_batch(X_b)
+                    optimizer.zero_grad()
+                    y_hat = self.model_(X_b)
+                    if y_hat.dim() == 1:
+                        y_hat = y_hat.unsqueeze(1)
+                    if y_b.dim() == 1:
+                        y_b = y_b.unsqueeze(1)
+                    # Weighted MSE: mean over samples, weighted mean over targets
+                    loss = ((y_hat - y_b) ** 2 * w_vec).mean()
+                    loss.backward()
+                    optimizer.step()
+
+                self.model_.eval()
+                val_losses = []
+                with torch.no_grad():
+                    for X_b, y_b in val_loader:
+                        y_hat = self.model_(X_b)
+                        if y_hat.dim() == 1:
+                            y_hat = y_hat.unsqueeze(1)
+                        if y_b.dim() == 1:
+                            y_b = y_b.unsqueeze(1)
+                        val_losses.append(((y_hat - y_b) ** 2).mean().item())
+                avg_val = float(np.mean(val_losses))
+                scheduler.step(avg_val)
+
+                if avg_val < best_val_loss:
+                    best_val_loss = avg_val
+                    best_state = {k: v.clone() for k, v in self.model_.state_dict().items()}
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    if patience_counter >= self.patience:
+                        break
+
+        if best_state is not None:
+            self.model_.load_state_dict(best_state)
 
     def fit(self, X: np.ndarray, y: np.ndarray):
         """Fit the CNN model.
@@ -473,7 +589,7 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
             channels=self.channels,
             kernel_size=self.kernel_size,
             dropout=self.dropout,
-        )
+        ).to(self.device_)
 
         # Split for validation (10% of data)
         n_samples = X.shape[0]
@@ -481,22 +597,25 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         indices = np.random.permutation(n_samples)
         train_idx, val_idx = indices[n_val:], indices[:n_val]
 
-        X_train, X_val = X[train_idx], X[val_idx]
-        y_train, y_val = y[train_idx], y[val_idx]
+        X_train_s, X_val_s = X[train_idx], X[val_idx]
+        y_train_s, y_val_s = y[train_idx], y[val_idx]
 
-        # Train
-        self.model_, _ = train_deep_model(
-            self.model_,
-            X_train, y_train,
-            X_val, y_val,
-            epochs=self.epochs,
-            batch_size=self.batch_size,
-            learning_rate=self.learning_rate,
-            weight_decay=self.weight_decay,
-            patience=self.patience,
-            device=self.device_,
-            verbose=self.verbose,
-        )
+        # Use two-phase weighted training if element_weights or augment is active
+        if self.element_weights or self.augment:
+            self._fit_weighted(X_train_s, y_train_s, X_val_s, y_val_s)
+        else:
+            self.model_, _ = train_deep_model(
+                self.model_,
+                X_train_s, y_train_s,
+                X_val_s, y_val_s,
+                epochs=self.epochs,
+                batch_size=self.batch_size,
+                learning_rate=self.learning_rate,
+                weight_decay=self.weight_decay,
+                patience=self.patience,
+                device=self.device_,
+                verbose=self.verbose,
+            )
 
         return self
 
