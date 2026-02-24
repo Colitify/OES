@@ -173,10 +173,9 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         Returns:
             Preprocessed spectra matrix
         """
-        X_processed = np.zeros_like(X, dtype=np.float32)
-
-        for i in range(X.shape[0]):
-            X_processed[i] = preprocess_spectrum(
+        from joblib import Parallel, delayed
+        results = Parallel(n_jobs=-1, prefer="threads")(
+            delayed(preprocess_spectrum)(
                 X[i],
                 baseline_correction=(self.baseline == "als"),
                 smoothing=(self.denoise == "savgol"),
@@ -184,10 +183,11 @@ class Preprocessor(BaseEstimator, TransformerMixin):
                 baseline_lam=self.baseline_lam,
                 baseline_p=self.baseline_p,
                 savgol_window=self.savgol_window,
-                savgol_polyorder=self.savgol_polyorder
+                savgol_polyorder=self.savgol_polyorder,
             )
-
-        return X_processed
+            for i in range(X.shape[0])
+        )
+        return np.array(results, dtype=np.float32)
 
     def fit_transform(self, X: np.ndarray, y=None) -> np.ndarray:
         """Fit and transform spectra."""
