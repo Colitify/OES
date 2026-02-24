@@ -36,6 +36,8 @@ def main():
     parser.add_argument("--baseline_p", type=float, default=0.026)
     parser.add_argument("--savgol_window", type=int, default=13)
     parser.add_argument("--savgol_polyorder", type=int, default=4)
+    parser.add_argument("--n_per_target", type=int, default=0,
+                        help="If >0, average predictions over blocks of N spectra per target")
     args = parser.parse_args()
 
     from src.data_loader import SpectralDataset
@@ -69,6 +71,12 @@ def main():
 
     # Predict
     predictions = model.predict(X)
+
+    # Per-target aggregation: average N spectra per target block
+    if args.n_per_target > 0:
+        from src.evaluation import aggregate_per_target
+        predictions = aggregate_per_target(predictions, args.n_per_target)
+        print(f"Aggregated predictions: {predictions.shape} ({args.n_per_target} spectra/target)")
 
     # Apply inverse logit transform if the model was trained with --logit_transform
     if LOGIT_TRANSFORM:
