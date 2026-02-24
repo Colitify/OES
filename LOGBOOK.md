@@ -832,3 +832,69 @@ python main.py \
 2. **更多 trials 可能改善 Cr 稳定性**：20 trials 对 7 维超参空间而言偏少，100 trials 有更大概率找到正则化程度足够高的配置。
 
 3. **元素分组处理**：高含量（Cr/Fe/Ni）继续用 Ridge+PCA，低含量（C/Mo/Cu/Si）用 XGBoost+NIST——混合策略可能同时兼顾两端。
+
+---
+
+## ML-012 · Hybrid 混合 per-element 模型
+
+**提交**：`f275db1`
+**目标**：直接用 ML-011 实验证据分组，低含量元素用 XGBoost+NIST，高含量元素用 Ridge+PCA，预期 RMSE_mean < 2.901
+
+### 核心设计
+
+```
+DEFAULT_HYBRID_MAP = {
+    "C":  "xgb", "Si": "xgb", "Mo": "xgb", "Cu": "xgb",   # 低含量/非线性
+    "Mn": "ridge", "Cr": "ridge", "Ni": "ridge", "Fe": "ridge",  # 高含量/线性
+}
+```
+
+**特征拼接**：`X_combined = hstack([X_pca (50), X_nist (5356)]) = (2100, 5406)`
+
+- Ridge 元素：`X[:, :50]`（PCA 段）
+- XGBoost 元素：`X[:, 50 + nist_local_indices]`（NIST 段中的 per-element 子集）
+
+`per_element_indices` 存储每个元素对应的绝对列下标，`PerTargetRegressor.fit/predict` 用此做路由。
+
+### 关键代码改动
+
+| 文件 | 改动 |
+|------|------|
+| `src/optimization.py` | `optimize_per_target()` 新增 `model_map`, `n_pca_cols`；循环内 `elem_model = model_map.get(target_name, model_name)` 路由；`objective()` 闭包用 `_model_type=elem_model` 默认参数捕获 |
+| `main.py` | `--model hybrid` 新选项；per_target 块内双 FeatureExtractor + hstack；`X_train_for_model` 变量跟踪正确的 X 传入训练/评估 |
+
+### 实验结果（20 trials, 5-fold CV）
+
+| 元素 | 模型 | Optuna RMSE | CV RMSE | R² |
+|------|------|------------|---------|-----|
+| C    | XGB  | 0.9335 | 0.9394 | 0.122 |
+| Si   | XGB  | 0.3906 | 0.4207 | 0.436 |
+| Mn   | Ridge| 0.5923 | 0.6395 | 0.748 |
+| Cr   | Ridge| 4.9532 | 5.5594 | 0.727 |
+| Mo   | XGB  | 1.0622 | 1.1389 | 0.267 |
+| Ni   | Ridge| 5.1128 | 5.1681 | 0.815 |
+| Cu   | XGB  | 0.3717 | 0.4374 | 0.612 |
+| Fe   | Ridge| 7.9128 | 8.4952 | 0.770 |
+| **RMSE_mean** | | | **2.850** | 0.562 |
+
+**基准对比**：RMSE_mean 2.901 → **2.850**（↓1.8%），guardrail PASS。
+
+与 ML-011 纯 XGBoost 的对比（ML-011 RMSE_mean=3.143）：
+- Cr R² 恢复：0.410（ML-011） → 0.727（ML-012，与 Ridge baseline 持平）
+- Fe R² 恢复：0.742（ML-011） → 0.770（ML-012）
+- 低含量元素保持 XGBoost 优势：Cu R²=0.612，Si R²=0.436
+
+### 与历史对比
+
+| 版本 | RMSE_mean | 关键特点 |
+|------|----------|---------|
+| ML-003（基准）| 2.907 | Ridge+PCA(86), 全局一个模型 |
+| ML-006 per-target | 2.912 | Ridge per-element, 各自优化 alpha |
+| ML-011 XGBoost+NIST | 3.143 | XGBoost+NIST 全部元素，Cr/Fe 退步 |
+| **ML-012 Hybrid** | **2.850** | **分组路由，历史最佳** |
+
+### 教训
+
+1. **物理直觉优于盲目搜索**：ML-011 失败的原因（Cr/Fe S/F 比过低）直接指导了 ML-012 的分组策略，省去了大量试错
+2. `X_train_for_model` 变量是关键——`PerTargetRegressor` 的 `per_element_indices` 存储的是 `X_combined` 中的绝对列下标，fit/eval 必须传入相同的拼接矩阵
+3. Ridge 的 20 trials Optuna 比 XGBoost 快 ~100x（毫秒级 vs 秒级），在 per-target 场景中混合使用两者整体耗时可接受
