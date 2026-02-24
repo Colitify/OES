@@ -1109,3 +1109,104 @@ ML-014 ANN+NIST：            2.403  ↓  9.9%
 | C  | 0.954 | 唯一可用发射线（247.9nm）信号极弱；含量范围窄 | 增加 NIST 窗口（±2nm）；logit+ANN 组合 |
 | Cr | 6.118 | ANN+NIST（976通道）比 Ridge+PCA 还差；特征维度过高导致过拟合 | 回归 Ridge+PCA 策略，或 ANN+PCA |
 | Fe | 7.855 | 基体元素含量范围宽（~60–99 wt%），绝对误差必然大 | 对数变换；关注相对误差指标 |
+
+---
+
+## ML-016 · ann_hybrid：Cr 单独回归 Ridge，其余保持 ANN
+
+**时间**：2026-02-24
+**提交**：`b3e6585`
+
+### 问题诊断
+
+ML-014 实现了纯 ANN+NIST per-element 方案，整体 RMSE 提升 15.7%，但对比 ML-012 hybrid 发现 Cr 出现明显退步：
+
+| 元素 | ML-012 Ridge | ML-014 ANN | 变化 |
+|------|-------------|-----------|------|
+| Cr   | 5.56        | 6.12      | **+10%（唯一退步元素）** |
+| Fe   | 8.50        | 7.86      | -7.5%（ANN 更好） |
+| Ni   | 5.17        | 2.56      | -50%（ANN 大幅提升） |
+| 其余 | —           | —         | 全部持平或改善 |
+
+在 8 个元素中，只有 Cr 在 ANN 下变差。退步原因分析：
+
+1. **维度过高**：Cr 的 NIST 发射线覆盖 976 个波长通道，是 C（100）的近 10 倍。在 2100 个样本下，ANN 的参数量（hidden_size×976）容易过拟合。
+2. **线性特征主导**：Cr 属于高浓度元素（~0.1–18 wt%），信号线性度好，Ridge 的正则化线性映射已经足够，ANN 引入了不必要的非线性噪声。
+3. **Ridge+PCA 的隐性优势**：PCA 的 50 个主成分已经做了全谱的方差压缩，Ridge 在低维空间的泛化能力优于 ANN 在高维 NIST 通道上的拟合。
+
+### 实现
+
+**核心设计**：新增 `--model ann_hybrid` 分支，`model_map={"Cr": "ridge"}`，`eff_model_name="ann"`。`optimize_per_target()` 已有完整的混合路由支持（ML-012/013 时建立），无需修改。
+
+**main.py 改动**（~20 行）：
+
+```python
+elif args.model == "ann_hybrid":
+    # ML-016: ANN+NIST for all elements except Cr which reverts to Ridge+PCA
+    fe_nist = FeatureExtractor(method="wavelength_selection", selection_method="nist", ...)
+    X_nist = fe_nist.fit_transform(X_train, y_train)
+    n_pca_cols = X_train_feat.shape[1]          # 50
+    X_train_for_model = np.hstack([X_train_feat, X_nist])  # (2100, 5406)
+    feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
+    model_map = {"Cr": "ridge"}                  # 只有 Cr 走 Ridge
+    # ...
+
+# Fallback eff_model_name
+if args.model == "hybrid":
+    eff_model_name = "ridge"
+elif args.model == "ann_hybrid":
+    eff_model_name = "ann"           # 其余 7 个元素默认 ANN
+else:
+    eff_model_name = args.model
+```
+
+**路由矩阵**（训练时列切片来自 `optimize_per_target()`）：
+
+| 元素 | 模型 | 输入特征 | 通道数 |
+|------|------|---------|--------|
+| Cr   | Ridge | `X[:, :50]`（PCA 列） | 50 |
+| C    | ANN   | `X[:, 50+nist_C]`（NIST 列） | 100 |
+| Si   | ANN   | `X[:, 50+nist_Si]` | 508 |
+| Mn   | ANN   | `X[:, 50+nist_Mn]` | 498 |
+| Mo   | ANN   | `X[:, 50+nist_Mo]` | 1027 |
+| Ni   | ANN   | `X[:, 50+nist_Ni]` | — |
+| Cu   | ANN   | `X[:, 50+nist_Cu]` | — |
+| Fe   | ANN   | `X[:, 50+nist_Fe]` | 1368 |
+
+### 结果
+
+| 元素 | ML-014 ANN | ML-016 ann_hybrid | 变化 |
+|------|-----------|-----------------|------|
+| C    | 0.954     | 0.954           | 不变 |
+| Si   | 0.371     | 0.371           | 不变 |
+| Mn   | 0.402     | 0.402           | 不变 |
+| **Cr** | **6.118** | **5.145**     | **↑16% 修复** |
+| Mo   | 0.714     | 0.714           | 不变 |
+| Ni   | 2.562     | 2.562           | 不变 |
+| Cu   | 0.251     | 0.251           | 不变 |
+| Fe   | 7.855     | 7.855           | 不变 |
+| **RMSE_mean** | **2.403** | **2.282** | **↑5.1%** |
+| per_target_RMSE | 2.036 | **1.941** | **↑4.7%** |
+
+Guardrail PASS（2.282 < 2.403 + 0.05）。
+
+### 历史 RMSE 完整路径（更新）
+
+```
+ML-001 基线：              3.314
+ML-002 PCA n_components：  2.930  ↓11.6%
+ML-003 预处理优化：        2.907  ↓ 0.8%
+ML-012 Hybrid：            2.850  ↓ 1.8%
+ML-013 GroupKFold：        2.667  ↓ 6.5%
+ML-014 ANN+NIST：          2.403  ↓ 9.9%
+ML-016 ann_hybrid：        2.282  ↓ 5.1%  ← 当前最佳
+────────────────────────────────────────────
+总体：3.314 → 2.282，提升 31.2%
+```
+
+### 不足与遗留问题
+
+1. **Cr 仍是最大瓶颈**：修复后 Cr RMSE=5.145，在 8 个元素中排第二高（仅次于 Fe 的 7.855），R²=0.767 仍有提升空间。Ridge+PCA 是稳定选择，但 Cr 有强干扰线（Fe 谱线密集），可能需要更精细的物理干扰校正（ICA 或手动选 3–5 条无干扰线）。
+2. **C 依然停滞**：RMSE=0.954，R²=0.094。C 的唯一强线 247.9 nm 信号极弱，已达 ANN/Ridge 的共同上限，需要其他思路（窗口扩展、logit 变换或换光谱仪设置）。
+3. **Fe 绝对误差大**：RMSE=7.855，但 Fe 作为基体元素（平均~70 wt%），相对误差（MAPE=6.4%）实际上是 8 个元素中最低的——这是评估指标的局限性，RMSE 对高浓度元素天然不公平。
+4. **实现代价极低**：本次改动仅 ~20 行 main.py，利用了现有 `optimize_per_target()` 的路由基础设施，说明 ML-012 的 hybrid 架构设计有很好的可扩展性。
