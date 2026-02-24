@@ -12,6 +12,23 @@ from typing import Dict, Any, Optional, Literal, Tuple
 import joblib
 from pathlib import Path
 
+try:
+    from xgboost import XGBRegressor
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+
+
+def _cuda_ok() -> bool:
+    """Check if CUDA is available and functional."""
+    try:
+        import torch
+        t = torch.zeros(1, device="cuda")
+        _ = t + 1
+        return True
+    except Exception:
+        return False
+
 
 def get_traditional_models(
     n_targets: int = 1,
@@ -46,6 +63,16 @@ def get_traditional_models(
             GradientBoostingRegressor(n_estimators=100, random_state=42)
         ) if n_targets > 1 else GradientBoostingRegressor(n_estimators=100, random_state=42)
 
+    if XGBOOST_AVAILABLE:
+        device = "cuda" if _cuda_ok() else "cpu"
+        models["xgb"] = XGBRegressor(
+            n_estimators=200, max_depth=5, learning_rate=0.05,
+            subsample=0.8, colsample_bytree=0.8,
+            reg_alpha=0.1, reg_lambda=1.0,
+            tree_method="hist", device=device,
+            n_jobs=-1, verbosity=0, random_state=42,
+        )
+
     if include_deep:
         from src.models.deep_learning import CNNRegressor
         models["cnn"] = CNNRegressor(
@@ -62,7 +89,7 @@ def get_traditional_models(
 
 
 def get_model_with_params(
-    model_name: Literal["pls", "ridge", "lasso", "elastic_net", "rf", "svr", "gbr", "cnn"],
+    model_name: Literal["pls", "ridge", "lasso", "elastic_net", "rf", "svr", "gbr", "cnn", "xgb"],
     params: Optional[Dict[str, Any]] = None,
     n_targets: int = 1
 ) -> Any:
@@ -119,6 +146,16 @@ def get_model_with_params(
             "verbose": False,
         }
         return CNNRegressor(**{**default_cnn_params, **params})
+
+    elif model_name == "xgb":
+        if not XGBOOST_AVAILABLE:
+            raise ImportError("xgboost is not installed. Run: pip install xgboost")
+        device = "cuda" if _cuda_ok() else "cpu"
+        return XGBRegressor(
+            **params,
+            tree_method="hist", device=device,
+            n_jobs=-1, verbosity=0, random_state=42,
+        )
 
     else:
         raise ValueError(f"Unknown model: {model_name}")

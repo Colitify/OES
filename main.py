@@ -53,8 +53,8 @@ def main():
         "--model",
         type=str,
         default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "cnn", "all"],
-        help="Model to train (cnn = 1D-CNN deep learning model)",
+        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "all"],
+        help="Model to train (cnn = 1D-CNN deep learning model, xgb = XGBoost)",
     )
     parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
     parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
@@ -96,7 +96,7 @@ def main():
     )
     parser.add_argument(
         "--selection_method", type=str, default="correlation",
-        choices=["correlation", "variance", "f_score", "sdvs"],
+        choices=["correlation", "variance", "f_score", "sdvs", "nist"],
         help="Wavelength selection method (used when --feature_method=wavelength_selection)"
     )
     parser.add_argument("--n_selected_wavelengths", type=int, default=500, help="Number of wavelengths to select (used when --feature_method=wavelength_selection)")
@@ -195,6 +195,7 @@ def main():
             method="wavelength_selection",
             n_components=args.n_selected_wavelengths,
             selection_method=args.selection_method,
+            wavelengths=train_data.wavelengths,
         )
     else:
         feature_extractor = FeatureExtractor(method="pca", n_components=args.n_components)
@@ -242,7 +243,18 @@ def main():
                 if logit_transformer._transform_mask[idx]:
                     per_target_inv[tname] = lambda yp: 100.0 / (1.0 + np.exp(-yp))
 
-        per_target_models, per_target_params, per_target_scores = optimize_per_target(
+        # For XGBoost per-element NIST selection, pass wavelengths corresponding to
+        # the feature columns. If wavelength_selection was used, columns are already
+        # a subset of original channels, so index train_data.wavelengths accordingly.
+        feat_wavelengths = None
+        if args.model == "xgb":
+            if (args.feature_method == "wavelength_selection"
+                    and feature_extractor._selected_indices is not None):
+                feat_wavelengths = train_data.wavelengths[feature_extractor._selected_indices]
+            elif args.feature_method == "none":
+                feat_wavelengths = train_data.wavelengths
+
+        per_target_models, per_target_params, per_target_scores, per_element_indices = optimize_per_target(
             X_train_feat, y_train,
             model_name=args.model,
             target_names=target_names,
@@ -250,9 +262,14 @@ def main():
             n_trials=args.n_trials,
             inverse_transforms=per_target_inv,
             y_original=y_for_opt if logit_transformer else None,
+            wavelengths=feat_wavelengths,
         )
 
-        best_model = PerTargetRegressor(per_target_models, target_names=target_names)
+        best_model = PerTargetRegressor(
+            per_target_models,
+            target_names=target_names,
+            per_element_indices=per_element_indices,
+        )
         best_model_name = f"{args.model}_per_target"
 
         # Report overall score

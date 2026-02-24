@@ -8,6 +8,26 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from typing import Optional, Tuple, List, Literal, Union
 
 
+# NIST Atomic Spectra Database — strongest lines in 200–1000 nm for steel elements
+# Source: NIST ASD (https://physics.nist.gov/asd), arc/spark conditions
+NIST_EMISSION_LINES = {
+    "C":  [247.856],
+    "Si": [212.412, 243.515, 250.690, 251.432, 252.411, 252.852, 288.158],
+    "Mn": [257.610, 259.373, 260.569, 279.482, 279.827, 280.106,
+           403.076, 403.307, 403.449],
+    "Cr": [205.552, 206.158, 267.716, 283.563, 284.325, 301.520,
+           357.869, 359.349, 360.533, 425.433, 427.480, 428.972],
+    "Mo": [202.030, 203.844, 281.615, 313.259, 315.816, 317.035,
+           319.397, 320.883, 379.825, 386.411, 390.296],
+    "Ni": [221.647, 227.021, 231.096, 232.003, 300.249,
+           341.476, 344.626, 349.296, 361.939],
+    "Cu": [213.598, 217.894, 224.261, 324.754, 327.396, 521.820],
+    "Fe": [238.204, 239.562, 240.488, 248.814, 259.939, 260.709,
+           271.442, 302.064, 358.119, 371.994, 373.487, 374.556,
+           375.824, 381.584, 382.044, 404.581, 438.355],
+}
+
+
 def extract_peaks(
     spectrum: np.ndarray,
     wavelengths: np.ndarray,
@@ -200,6 +220,39 @@ def select_wavelengths_sdvs(
     return np.sort(np.array(list(selected), dtype=int))
 
 
+def select_wavelengths_nist(
+    wavelengths: np.ndarray,
+    target_names=None,
+    delta_nm: float = 1.0,
+) -> np.ndarray:
+    """Select wavelength indices near NIST atomic emission lines.
+
+    Args:
+        wavelengths: Array of wavelength values in nm (length = n_wavelengths).
+        target_names: Element names to include (e.g. ["Mo", "C"]). None = all.
+        delta_nm: Half-window around each emission line in nm. Default 1.0.
+
+    Returns:
+        Sorted array of unique channel indices within the emission line windows.
+    """
+    if target_names is None:
+        target_names = list(NIST_EMISSION_LINES.keys())
+
+    selected = set()
+    for name in target_names:
+        for line_nm in NIST_EMISSION_LINES.get(name, []):
+            mask = np.abs(wavelengths - line_nm) <= delta_nm
+            selected.update(np.where(mask)[0].tolist())
+
+    indices = np.sort(np.array(list(selected), dtype=int))
+    if len(indices) == 0:
+        raise ValueError(
+            f"No channels found within ±{delta_nm} nm of NIST lines for "
+            f"{target_names}. Check that wavelengths cover 200–1000 nm."
+        )
+    return indices
+
+
 class FeatureExtractor(BaseEstimator, TransformerMixin):
     """Feature extraction and dimensionality reduction for spectral data."""
 
@@ -207,7 +260,8 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self,
         method: Literal["pca", "pls", "wavelength_selection", "none"] = "pca",
         n_components: int = 50,
-        selection_method: Literal["correlation", "variance", "f_score", "sdvs"] = "correlation"
+        selection_method: Literal["correlation", "variance", "f_score", "sdvs", "nist"] = "correlation",
+        wavelengths: Optional[np.ndarray] = None,
     ):
         """Initialize feature extractor.
 
@@ -219,6 +273,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self.method = method
         self.n_components = n_components
         self.selection_method = selection_method
+        self.wavelengths = wavelengths
         self._model = None
         self._selected_indices = None
 
@@ -240,13 +295,23 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             self._model.fit(X, y)
 
         elif self.method == "wavelength_selection":
-            if y is None:
-                raise ValueError("y is required for wavelength selection")
-            if self.selection_method == "sdvs":
+            if self.selection_method == "nist":
+                if self.wavelengths is None:
+                    raise ValueError(
+                        "wavelengths must be provided to FeatureExtractor for selection_method='nist'"
+                    )
+                self._selected_indices = select_wavelengths_nist(
+                    self.wavelengths, delta_nm=1.0
+                )
+            elif self.selection_method == "sdvs":
+                if y is None:
+                    raise ValueError("y is required for sdvs wavelength selection")
                 self._selected_indices = select_wavelengths_sdvs(
                     X, y, n_per_element=self.n_components
                 )
             else:
+                if y is None:
+                    raise ValueError("y is required for wavelength selection")
                 self._selected_indices = select_wavelengths(
                     X, y, self.n_components, self.selection_method
                 )

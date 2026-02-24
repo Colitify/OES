@@ -848,6 +848,7 @@ def optimize_per_target(
     n_trials: int = 20,
     inverse_transforms: Optional[Dict[str, Callable]] = None,
     y_original: Optional[np.ndarray] = None,
+    wavelengths: Optional[np.ndarray] = None,
 ) -> Tuple[list, Dict[str, Dict[str, Any]], Dict[str, float]]:
     """Optimize model hyperparameters separately for each target.
 
@@ -867,6 +868,8 @@ def optimize_per_target(
         y_original: Original (untransformed) targets; required when inverse_transforms
             is provided.
         n_trials: Number of Optuna trials per target
+        wavelengths: Wavelength array (nm). When provided and model_name="xgb", each
+            target uses only its own NIST emission line channels for maximum SNR.
 
     Returns:
         Tuple of (list_of_models, params_per_target, scores_per_target)
@@ -887,6 +890,7 @@ def optimize_per_target(
     models_list = []
     params_per_target = {}
     scores_per_target = {}
+    per_element_indices: Dict[str, Any] = {}
 
     from sklearn.model_selection import cross_val_predict as _cvp
 
@@ -896,7 +900,17 @@ def optimize_per_target(
         inv_fn = (inverse_transforms or {}).get(target_name)
         y_orig_single = y_original[:, i] if (inv_fn is not None and y_original is not None) else None
 
-        def objective(trial, _y=y_single, _inv=inv_fn, _y_orig=y_orig_single):
+        # Per-element NIST channel selection for XGBoost
+        elem_indices = None
+        if model_name == "xgb" and wavelengths is not None:
+            from src.features import select_wavelengths_nist, NIST_EMISSION_LINES
+            if target_name in NIST_EMISSION_LINES:
+                elem_indices = select_wavelengths_nist(wavelengths, [target_name], delta_nm=1.0)
+                print(f"    [NIST] {target_name}: {len(elem_indices)} channels selected")
+        per_element_indices[target_name] = elem_indices
+        X_fit = X[:, elem_indices] if elem_indices is not None else X
+
+        def objective(trial, _y=y_single, _inv=inv_fn, _y_orig=y_orig_single, _X=X_fit):
             if model_name == "ridge":
                 alpha = trial.suggest_float("alpha", 1e-2, 1e5, log=True)
                 model = Ridge(alpha=alpha)
@@ -904,7 +918,7 @@ def optimize_per_target(
                 alpha = trial.suggest_float("alpha", 1e-6, 1e2, log=True)
                 model = Lasso(alpha=alpha, max_iter=10000)
             elif model_name == "pls":
-                n_components = trial.suggest_int("n_components", 5, min(50, X.shape[0] - 1, X.shape[1]))
+                n_components = trial.suggest_int("n_components", 5, min(50, _X.shape[0] - 1, _X.shape[1]))
                 model = PLSRegression(n_components=n_components)
             elif model_name == "rf":
                 params = {
@@ -917,16 +931,31 @@ def optimize_per_target(
                     "random_state": 42,
                 }
                 model = RandomForestRegressor(**params)
+            elif model_name == "xgb":
+                from xgboost import XGBRegressor
+                from src.models.traditional import _cuda_ok
+                xgb_params = {
+                    "n_estimators":     trial.suggest_int("n_estimators", 100, 1000),
+                    "max_depth":        trial.suggest_int("max_depth", 3, 8),
+                    "learning_rate":    trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+                    "subsample":        trial.suggest_float("subsample", 0.5, 1.0),
+                    "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+                    "reg_alpha":        trial.suggest_float("reg_alpha", 1e-4, 10.0, log=True),
+                    "reg_lambda":       trial.suggest_float("reg_lambda", 1e-4, 10.0, log=True),
+                }
+                device = "cuda" if _cuda_ok() else "cpu"
+                model = XGBRegressor(**xgb_params, tree_method="hist", device=device,
+                                     n_jobs=-1, verbosity=0, random_state=42)
             else:
                 raise ValueError(f"Unknown model: {model_name}")
 
             if _inv is not None and _y_orig is not None:
                 # Compute RMSE in original space (e.g., after inverse logit)
-                y_pred_trans = _cvp(model, X, _y, cv=cv)
+                y_pred_trans = _cvp(model, _X, _y, cv=cv)
                 y_pred_orig = _inv(y_pred_trans)
                 return float(np.sqrt(np.mean((_y_orig - y_pred_orig) ** 2)))
             else:
-                scores = cross_val_score(model, X, _y, cv=cv, scoring="neg_root_mean_squared_error")
+                scores = cross_val_score(model, _X, _y, cv=cv, scoring="neg_root_mean_squared_error")
                 return -scores.mean()
 
         study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42 + i))
@@ -946,7 +975,16 @@ def optimize_per_target(
             model = PLSRegression(**best_params)
         elif model_name == "rf":
             model = RandomForestRegressor(**best_params, n_jobs=-1, random_state=42)
+        elif model_name == "xgb":
+            from xgboost import XGBRegressor
+            from src.models.traditional import _cuda_ok
+            device = "cuda" if _cuda_ok() else "cpu"
+            model = XGBRegressor(**best_params, tree_method="hist", device=device,
+                                 n_jobs=-1, verbosity=0, random_state=42)
+        else:
+            raise ValueError(f"Unknown model: {model_name}")
 
+        model.fit(X_fit, y_single)
         models_list.append(model)
         params_per_target[target_name] = best_params
         scores_per_target[target_name] = best_score
@@ -954,7 +992,7 @@ def optimize_per_target(
         print(f"    Best RMSE: {best_score:.4f}")
         print(f"    Best params: {best_params}")
 
-    return models_list, params_per_target, scores_per_target
+    return models_list, params_per_target, scores_per_target, per_element_indices
 
 
 from sklearn.base import BaseEstimator, RegressorMixin, clone
@@ -970,21 +1008,26 @@ class PerTargetRegressor(BaseEstimator, RegressorMixin):
     with sklearn's cross_val_predict and other utilities.
     """
 
-    def __init__(self, models: list = None, target_names: Optional[list] = None):
+    def __init__(self, models: list = None, target_names: Optional[list] = None,
+                 per_element_indices: Optional[Dict[str, Any]] = None):
         """Initialize with a list of models, one per target.
 
         Args:
             models: List of fitted or unfitted models, one per target
             target_names: Names of targets for reporting
+            per_element_indices: Optional dict mapping target name to channel index array.
+                When provided, each model sees only its assigned channel subset.
         """
         self.models = models if models is not None else []
         self.target_names = target_names
+        self.per_element_indices = per_element_indices or {}
 
     def __sklearn_clone__(self):
         """Custom clone that preserves model hyperparameters."""
         # Clone each model to preserve hyperparameters but reset fit state
         cloned_models = [clone(model) for model in self.models]
-        return PerTargetRegressor(models=cloned_models, target_names=self.target_names)
+        return PerTargetRegressor(models=cloned_models, target_names=self.target_names,
+                                  per_element_indices=self.per_element_indices)
 
     @property
     def n_targets(self):
@@ -1006,7 +1049,10 @@ class PerTargetRegressor(BaseEstimator, RegressorMixin):
             raise ValueError(f"Expected {n_targets} targets, got {y.shape[1]}")
 
         for i, model in enumerate(self.models):
-            model.fit(X, y[:, i])
+            name = self.target_names[i] if self.target_names else None
+            indices = self.per_element_indices.get(name) if name else None
+            X_in = X[:, indices] if indices is not None else X
+            model.fit(X_in, y[:, i])
 
         return self
 
@@ -1020,8 +1066,11 @@ class PerTargetRegressor(BaseEstimator, RegressorMixin):
             Predictions matrix (n_samples, n_targets)
         """
         predictions = []
-        for model in self.models:
-            pred = model.predict(X)
+        for i, model in enumerate(self.models):
+            name = self.target_names[i] if self.target_names else None
+            indices = self.per_element_indices.get(name) if name else None
+            X_in = X[:, indices] if indices is not None else X
+            pred = model.predict(X_in)
             if pred.ndim > 1:
                 pred = pred.ravel()
             predictions.append(pred)
