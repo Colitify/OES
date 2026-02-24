@@ -382,6 +382,14 @@ def optimize_preprocessing_only(
         return -scores.mean()
 
     study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
+    # Warm-start: first trial uses ML-003 known-best params so TPE explores around the optimum
+    study.enqueue_trial({
+        "baseline_lam": 416448.0,
+        "baseline_p": 0.026,
+        "savgol_window_half": 6,   # 2*6+1 = 13
+        "savgol_polyorder": 4,
+        "n_components": 86,
+    })
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
