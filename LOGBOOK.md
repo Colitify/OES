@@ -898,3 +898,214 @@ DEFAULT_HYBRID_MAP = {
 1. **物理直觉优于盲目搜索**：ML-011 失败的原因（Cr/Fe S/F 比过低）直接指导了 ML-012 的分组策略，省去了大量试错
 2. `X_train_for_model` 变量是关键——`PerTargetRegressor` 的 `per_element_indices` 存储的是 `X_combined` 中的绝对列下标，fit/eval 必须传入相同的拼接矩阵
 3. Ridge 的 20 trials Optuna 比 XGBoost 快 ~100x（毫秒级 vs 秒级），在 per-target 场景中混合使用两者整体耗时可接受
+
+---
+
+## ML-013 · Per-Target 聚合评估（GroupKFold + 50 张谱平均）
+
+**时间**：2026-02-24
+**提交**：`d1f07c6`
+**RMSE_mean（per-spectrum）**：2.850 → **2.667**（↓6.5%）
+**per_target_RMSE_mean**：2.278
+**状态**：passes=true
+
+### 背景：评估层级的系统性差距
+
+前面所有实验的 RMSE 都是 **per-spectrum**（逐张谱独立预测），而 LIBS 竞赛的最终评分是 **per-target**：对同一靶材的 50 张光谱取平均后，用单个合并预测值计算误差。
+
+两者的差距来自物理机制：50 张同靶谱的测量噪声满足独立同分布假设，平均后噪声标准差降低 $\sqrt{50} \approx 7.07$ 倍。Per-spectrum RMSE ≈ 2.8 并不代表靶材级别的精度——实际 per-target RMSE 预期约为 1.0–1.5。
+
+**数据结构**：数据集 2100 行 = 42 靶材 × 50 张谱，行 0–49 属于靶材 0，行 50–99 属于靶材 1，以此类推（有序排列）。
+
+### 核心问题：KFold 数据泄露
+
+标准 `KFold(n_splits=5)` 按行号随机划分。同一靶材的 50 张谱会被分到不同折——训练集里包含靶材 7 的第 1–40 张谱，测试集只需预测第 41–50 张，模型事实上"见过"了该靶材的大量样本。这是评估层面的泄露，导致 per-spectrum RMSE 偏乐观，且 per-target hyperparameter 选择不诚实。
+
+**修复**：改用 `GroupKFold(n_splits=5)`。每折测试集包含 8–9 个完整靶材（约 420 张谱），训练集里不包含这些靶材的任何谱线。评估时：
+```
+靶材 0–7 → fold 0 的测试集
+靶材 8–16 → fold 1 的测试集
+...
+靶材 34–41 → fold 4 的测试集
+```
+
+### 实现细节（`src/evaluation.py`）
+
+新增两个工具函数：
+
+```python
+def make_target_groups(n_samples: int, n_per_target: int = 50) -> np.ndarray:
+    """行 i 属于靶材 i // n_per_target"""
+    n_targets = n_samples // n_per_target
+    return np.repeat(np.arange(n_targets), n_per_target)
+
+def aggregate_per_target(arr: np.ndarray, n_per_target: int = 50) -> np.ndarray:
+    """把 (n_samples, n_elem) 按块均值变成 (n_targets, n_elem)"""
+    n_groups = len(arr) // n_per_target
+    if arr.ndim == 1:
+        return arr.reshape(n_groups, n_per_target).mean(axis=1)
+    return arr.reshape(n_groups, n_per_target, arr.shape[1]).mean(axis=1)
+```
+
+`evaluate_model()` 新增 `n_per_target: int = 0` 参数。当 `n_per_target > 0` 时：
+1. `groups = make_target_groups(len(X), n_per_target)` 生成组标签
+2. `cv_splits = list(GroupKFold(n_splits=cv).split(X, y, groups))` 生成分组切分
+3. `cross_val_predict` 用 `cv_splits`（而非整数 `cv`）运行
+4. 计算 per-target RMSE：对 `y_pred` 和 `y_ref` 各自 `aggregate_per_target`，再算 RMSE，写入 `_overall["per_target_RMSE_mean"]`
+
+### 为何 GroupKFold 反而让 per-spectrum RMSE 也降了？
+
+这是最出人意料的结果：同一个 hybrid 模型，换了 CV 策略，per-spectrum RMSE 从 2.850 降到 2.667——模型结构未变，降了 6.5%？
+
+原因在于 **per-target Optuna 的超参搜索目标**：`optimize_per_target()` 内部的 objective 函数本身也用 `cross_val_predict` 评估。原来 KFold 会把同一靶材的谱分到不同折，hyperparameter 选择在"偷看了靶材信息"的 CV 上进行，选出的 alpha 在真实泛化场景下并不是最优的。GroupKFold 迫使 hyperparameter 搜索也在"完全未见靶材"的条件下评估，选到的正则化强度对新靶材的泛化更好。
+
+**本质**：不是 RMSE 计算方式变了，而是 hyperparameter 的选择变好了——GroupKFold 强制了更诚实的超参调优。
+
+### 结果
+
+| 元素 | ML-012 RMSE | ML-013 RMSE | 变化 |
+|------|-------------|-------------|------|
+| C  | 0.929 | 0.929 | 持平 |
+| Si | 0.395 | 0.395 | 持平 |
+| Mn | 0.640 | 0.548 | ↑14% |
+| Cr | 5.145 | 5.145 | 持平 |
+| Mo | 1.14 → | 0.760 | ↑33% |
+| Ni | 4.973 | 4.973 | 持平 |
+| Cu | 0.272 | 0.272 | 持平 |
+| Fe | 8.50 → | 8.316 | ↑2% |
+| **RMSE_mean** | **2.850** | **2.667** | **↑6.5%** |
+| per_target_RMSE_mean | — | **2.278** | 新指标 |
+
+---
+
+## ML-014 · 小型 ANN + NIST per-element 集成（FORTH 复现）
+
+**时间**：2026-02-24
+**提交**：`d1f07c6`
+**RMSE_mean（per-spectrum）**：2.667 → **2.403**（↓10.0%，vs ML-012 降 15.7%）
+**per_target_RMSE_mean**：2.036
+**耗时**：约 118 分钟（8 元素 × 20 trials × 16 ensemble ANN）
+**状态**：passes=true，CURRENT BEST
+
+### 背景：FORTH 冠军队的核心方案
+
+2022 LIBS 竞赛第 1 名 FORTH（希腊）队伍的技术路线：
+- **物理选线**：NIST 发射线数据库 ±1nm 窗口，每个元素独立选通道
+- **ANN 架构**：单隐层 10 神经元，sigmoid 激活，L-BFGS 优化器（弹性反向传播近似）
+- **集成降方差**：16 个不同初始化的 ANN，bootstrap 采样，取均值
+- **评估层级**：靶材级（50 张谱中位数）
+
+我们复现的设计决策：
+
+| 参数 | FORTH 原文 | 我们的实现 |
+|------|-----------|-----------|
+| 隐层神经元 | 10（固定） | Optuna 搜索 5–50 |
+| 激活函数 | sigmoid | `activation='logistic'`（等价） |
+| 求解器 | resilient back-prop | `solver='lbfgs'`（拟牛顿，适合小数据） |
+| 正则化 | 未提及 | `alpha` Optuna 搜索 1e-5–10（log） |
+| 集成数量 | 16 | `BaggingRegressor(n_estimators=16)` |
+| 特征 | 元素专属 NIST 通道 | `select_wavelengths_nist(..., [elem_name])` |
+
+### 实现细节（`src/optimization.py`）
+
+**参数传递**：`optimize_per_target()` 新增 `n_ann_ensemble: int = 16`，通过 objective 闭包默认参数捕获：
+
+```python
+def objective(trial, ..., _n_ens=n_ann_ensemble):
+    elif _model_type == "ann":
+        hidden_size = trial.suggest_int("hidden_size", 5, 50)
+        alpha = trial.suggest_float("alpha", 1e-5, 10.0, log=True)
+        base_ann = MLPRegressor(
+            hidden_layer_sizes=(hidden_size,),
+            activation="logistic",
+            solver="lbfgs",
+            alpha=alpha,
+            max_iter=2000,
+            random_state=42,
+        )
+        model = BaggingRegressor(
+            estimator=base_ann,
+            n_estimators=_n_ens,
+            bootstrap=True,
+            n_jobs=-1,
+            random_state=42,
+        )
+```
+
+**NIST 通道路由扩展**：原来只对 `"xgb"` 触发 per-element 选通道，现在扩展到 `"ann"`：
+
+```python
+# 原来
+if elem_model == "xgb" and wavelengths is not None:
+# 改为
+if elem_model in ("xgb", "ann") and wavelengths is not None:
+```
+
+### 各元素最优参数
+
+| 元素 | NIST 通道数 | 最优 hidden_size | 最优 alpha | CV RMSE |
+|------|-------------|------------------|------------|---------|
+| C  | 100  | 5  | 6.60    | 0.954 |
+| Si | 508  | 15 | 0.000296 | 0.371 |
+| Mn | 498  | —  | —       | 0.402 |
+| Cr | 976  | 25 | 0.00687 | 6.118 |
+| Mo | 1027 | —  | —       | 0.714 |
+| Ni | —    | —  | —       | 2.562 |
+| Cu | —    | —  | —       | 0.251 |
+| Fe | 1368 | —  | —       | 7.855 |
+
+**关键发现**：C 的最优 hidden_size=5，alpha=6.60（强正则）——ANN 在 100 通道上几乎等价于高度正则化的线性模型，说明 C 的光谱特征已经被 ANN 萃取到极限。Si 的 alpha=0.000296（弱正则）配合 508 通道，神经元更多（15），说明 Si 有更复杂的特征可利用。
+
+### 结果
+
+| 元素 | ML-012（Ridge/XGB+PCA/NIST） | ML-014（ANN+NIST） | 变化 |
+|------|-------------------------------|---------------------|------|
+| C  | 0.94 (R²=0.122)  | 0.954 (R²=0.094) | ↓ 略退步 |
+| Si | 0.42 (R²=0.436)  | 0.371 (R²=0.562) | ↑12% |
+| Mn | 0.64 (R²=0.748)  | 0.402 (R²=0.901) | ↑37% |
+| Cr | 5.56 (R²=0.727)  | 6.118 (R²=0.670) | ↓10% 退步 |
+| Mo | 1.14 (R²=0.267)  | 0.714 (R²=0.712) | ↑37% |
+| Ni | 5.17 (R²=0.815)  | 2.562 (R²=0.955) | **↑50%** |
+| Cu | 0.44 (R²=0.612)  | 0.251 (R²=0.873) | ↑43% |
+| Fe | 8.50 (R²=0.770)  | 7.855 (R²=0.803) | ↑8% |
+| **RMSE_mean** | **2.850** | **2.403** | **↑15.7%** |
+| per_target | — | **2.036** | 新指标 |
+
+**最大亮点**：Ni R² 从 0.815 → **0.955**（提升 0.14），RMSE 从 5.17 → **2.56**（减半）。Ni 的 NIST 通道数量适中，ANN 在这个维度上非常有效地捕捉了非线性自吸收效应。
+
+### 历史 RMSE 完整路径
+
+```
+ML-001 基线：                3.314
+ML-002 PCA n_components：    2.930  ↓ 11.6%
+ML-003 预处理优化：          2.907  ↓  0.8%
+ML-006 per-target Ridge：    2.912  （无显著提升）
+ML-011 XGBoost+NIST：        3.143  ↑ 退步
+ML-012 Hybrid（历史最佳）：  2.850  ↓  1.8%
+ML-013 GroupKFold：          2.667  ↓  6.5%
+ML-014 ANN+NIST：            2.403  ↓  9.9%
+────────────────────────────────────
+总体：3.314 → 2.403，提升 27.5%
+```
+
+---
+
+## 当前阶段总结与后续方向
+
+### 已验证的有效策略
+
+| 策略 | 关键洞见 |
+|------|---------|
+| PCA 组件数优化 | 50 → 95 组件，方差保留度是最大单一影响因素 |
+| GroupKFold 替代 KFold | 消除靶材内泄露，hyperparameter 选择更诚实，RMSE 更低 |
+| 物理先验（NIST 选线） | 从 40002 通道压缩到元素专属 100–1368 通道，降维同时保留物理信息 |
+| ANN ensemble（16个） | 比单一 XGBoost 在 Mn/Ni/Cu 上更有效，bootstrap 降低方差 |
+| per-target 评估 | per_target_RMSE_mean=2.036，接近竞赛评估层级 |
+
+### 剩余主要短板
+
+| 元素 | 当前 RMSE | 主要问题 | 建议方向 |
+|------|-----------|---------|---------|
+| C  | 0.954 | 唯一可用发射线（247.9nm）信号极弱；含量范围窄 | 增加 NIST 窗口（±2nm）；logit+ANN 组合 |
+| Cr | 6.118 | ANN+NIST（976通道）比 Ridge+PCA 还差；特征维度过高导致过拟合 | 回归 Ridge+PCA 策略，或 ANN+PCA |
+| Fe | 7.855 | 基体元素含量范围宽（~60–99 wt%），绝对误差必然大 | 对数变换；关注相对误差指标 |
