@@ -148,6 +148,19 @@
       "priority": 11,
       "passes": false,
       "notes": "Based on FORTH team (1st place, LIBS 2022 competition). NIST prior filters 40002 channels to element-specific emission windows; XGBoost captures non-linear self-absorption effects for low-concentration elements."
+    },
+    {
+      "id": "ML-012",
+      "title": "Hybrid per-element model (Ridge for Cr/Fe/Ni/Mn, XGBoost for C/Si/Mo/Cu)",
+      "acceptanceCriteria": [
+        "CLI: --model hybrid --per_target --n_trials 20",
+        "Ridge elements (Cr/Fe/Ni/Mn) use PCA features; XGBoost elements (C/Si/Mo/Cu) use per-element NIST channels",
+        "X_combined = hstack([X_pca, X_nist]) passed to optimize_per_target with n_pca_cols",
+        "RMSE_mean improves vs baseline 2.901 (guardrail --tol 0.05 passes)"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "RMSE_mean improved from 2.901 to 2.850 (1.8%). Hybrid routing: C/Si/Mo/Cu → XGBoost+NIST (low-concentration, non-linear), Cr/Fe/Ni/Mn → Ridge+PCA (high-concentration, linear). Per-element: C=0.94, Si=0.42, Mn=0.64, Cr=5.56, Mo=1.14, Ni=5.17, Cu=0.44, Fe=8.50."
     }
   ]
 }

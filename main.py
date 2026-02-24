@@ -53,8 +53,8 @@ def main():
         "--model",
         type=str,
         default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "all"],
-        help="Model to train (cnn = 1D-CNN deep learning model, xgb = XGBoost)",
+        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "hybrid", "all"],
+        help="Model to train (cnn = 1D-CNN, xgb = XGBoost, hybrid = per-element Ridge/XGBoost)",
     )
     parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
     parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
@@ -226,6 +226,9 @@ def main():
     include_deep = args.model == "cnn" or args.model == "all"
     models = get_traditional_models(n_targets=train_data.n_targets, include_deep=include_deep)
 
+    # X passed to final fit/eval (updated to X_combined in hybrid per-target mode)
+    X_train_for_model = X_train_feat
+
     # Per-target optimization mode (ML-006)
     if args.per_target:
         print(f"\n  === Per-Target Optimization Mode ===")
@@ -243,26 +246,54 @@ def main():
                 if logit_transformer._transform_mask[idx]:
                     per_target_inv[tname] = lambda yp: 100.0 / (1.0 + np.exp(-yp))
 
-        # For XGBoost per-element NIST selection, pass wavelengths corresponding to
-        # the feature columns. If wavelength_selection was used, columns are already
-        # a subset of original channels, so index train_data.wavelengths accordingly.
+        # Default hybrid map: XGBoost for low-concentration elements,
+        # Ridge for high-concentration elements (ML-012)
+        DEFAULT_HYBRID_MAP = {
+            "C": "xgb", "Si": "xgb", "Mo": "xgb", "Cu": "xgb",
+            "Mn": "ridge", "Cr": "ridge", "Ni": "ridge", "Fe": "ridge",
+        }
+
+        # Set up per-element routing, wavelengths, and combined features
         feat_wavelengths = None
-        if args.model == "xgb":
+        n_pca_cols = 0
+        model_map = None
+
+        if args.model == "hybrid":
+            # Build NIST feature columns for XGBoost elements (hstacked after PCA)
+            print("  [Hybrid] Building NIST feature columns for XGBoost elements...")
+            fe_nist = FeatureExtractor(
+                method="wavelength_selection",
+                selection_method="nist",
+                wavelengths=train_data.wavelengths,
+            )
+            X_nist = fe_nist.fit_transform(X_train, y_train)
+            n_pca_cols = X_train_feat.shape[1]
+            X_train_for_model = np.hstack([X_train_feat, X_nist])
+            feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
+            model_map = DEFAULT_HYBRID_MAP
+            print(f"  [Hybrid] X_pca={X_train_feat.shape}, X_nist={X_nist.shape}, "
+                  f"X_combined={X_train_for_model.shape}")
+        elif args.model == "xgb":
             if (args.feature_method == "wavelength_selection"
                     and feature_extractor._selected_indices is not None):
                 feat_wavelengths = train_data.wavelengths[feature_extractor._selected_indices]
             elif args.feature_method == "none":
                 feat_wavelengths = train_data.wavelengths
 
+        # Fallback model_name for elements not in model_map
+        eff_model_name = "ridge" if args.model == "hybrid" else args.model
+
         per_target_models, per_target_params, per_target_scores, per_element_indices = optimize_per_target(
-            X_train_feat, y_train,
-            model_name=args.model,
+            X_train_for_model, y_train,
+            model_name=eff_model_name,
             target_names=target_names,
             cv=args.cv,
             n_trials=args.n_trials,
             inverse_transforms=per_target_inv,
             y_original=y_for_opt if logit_transformer else None,
             wavelengths=feat_wavelengths,
+            model_map=model_map,
+            n_pca_cols=n_pca_cols,
         )
 
         best_model = PerTargetRegressor(
@@ -576,7 +607,7 @@ def main():
 
     # Train final model
     print(f"\n  Training {best_model_name}...")
-    best_model = train_traditional_model(best_model, X_train_feat, y_train)
+    best_model = train_traditional_model(best_model, X_train_for_model, y_train)
 
     # Save model
     model_path = output_dir / "models" / f"{best_model_name}_model.joblib"
@@ -585,7 +616,7 @@ def main():
     # 5. Evaluate
     print("\n[5/5] Evaluation...")
     metrics, y_pred = evaluate_model(
-        best_model, X_train_feat, y_train,
+        best_model, X_train_for_model, y_train,
         cv=args.cv, target_names=target_names,
         pred_transform=logit_transformer.inverse_transform if logit_transformer else None,
         y_true=y_for_opt if logit_transformer else None,

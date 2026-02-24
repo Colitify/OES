@@ -849,6 +849,8 @@ def optimize_per_target(
     inverse_transforms: Optional[Dict[str, Callable]] = None,
     y_original: Optional[np.ndarray] = None,
     wavelengths: Optional[np.ndarray] = None,
+    model_map: Optional[Dict[str, str]] = None,
+    n_pca_cols: int = 0,
 ) -> Tuple[list, Dict[str, Dict[str, Any]], Dict[str, float]]:
     """Optimize model hyperparameters separately for each target.
 
@@ -857,9 +859,12 @@ def optimize_per_target(
     different characteristics.
 
     Args:
-        X: Feature matrix
+        X: Feature matrix. For hybrid mode, this is np.hstack([X_pca, X_nist])
+           where the first n_pca_cols columns are PCA features and the rest are
+           NIST-union wavelength features.
         y: Target matrix (n_samples, n_targets), may be transformed (e.g. logit)
-        model_name: Model to optimize ("ridge", "lasso", "pls", "rf")
+        model_name: Default model type for all targets ("ridge", "lasso", "pls",
+            "rf", "xgb"). Overridden per-target by model_map.
         target_names: Names of targets for reporting
         cv: Number of CV folds
         inverse_transforms: Optional dict mapping target_name -> inverse_transform callable.
@@ -868,14 +873,22 @@ def optimize_per_target(
         y_original: Original (untransformed) targets; required when inverse_transforms
             is provided.
         n_trials: Number of Optuna trials per target
-        wavelengths: Wavelength array (nm). When provided and model_name="xgb", each
-            target uses only its own NIST emission line channels for maximum SNR.
+        wavelengths: Wavelength array (nm) corresponding to NIST columns in X.
+            For hybrid mode: wavelengths of the NIST portion (X[:, n_pca_cols:]).
+            For pure xgb mode (n_pca_cols=0): wavelengths of the entire X.
+        model_map: Optional dict mapping target_name -> model type. Allows per-element
+            model selection, e.g. {"Cr": "ridge", "Mo": "xgb"}. Falls back to
+            model_name for targets not in the map.
+        n_pca_cols: Number of PCA columns at the start of X (hybrid mode only).
+            Ridge elements use X[:, :n_pca_cols]; XGBoost elements use
+            X[:, n_pca_cols:] sliced further by NIST emission lines.
 
     Returns:
-        Tuple of (list_of_models, params_per_target, scores_per_target)
+        Tuple of (list_of_models, params_per_target, scores_per_target, per_element_indices)
         - list_of_models: List of trained models, one per target
         - params_per_target: Dict mapping target name to best params
         - scores_per_target: Dict mapping target name to best RMSE
+        - per_element_indices: Dict mapping target name to column indices in X
     """
     if not OPTUNA_AVAILABLE:
         raise ImportError("Optuna is required for optimization")
@@ -900,27 +913,42 @@ def optimize_per_target(
         inv_fn = (inverse_transforms or {}).get(target_name)
         y_orig_single = y_original[:, i] if (inv_fn is not None and y_original is not None) else None
 
-        # Per-element NIST channel selection for XGBoost
-        elem_indices = None
-        if model_name == "xgb" and wavelengths is not None:
+        # Determine model type for this element (supports hybrid mode via model_map)
+        elem_model = (model_map or {}).get(target_name, model_name)
+
+        # Compute column slice in X (X may be X_combined = hstack([X_pca, X_nist]))
+        col_slice = None
+        if elem_model == "xgb" and wavelengths is not None:
             from src.features import select_wavelengths_nist, NIST_EMISSION_LINES
             if target_name in NIST_EMISSION_LINES:
-                elem_indices = select_wavelengths_nist(wavelengths, [target_name], delta_nm=1.0)
-                print(f"    [NIST] {target_name}: {len(elem_indices)} channels selected")
-        per_element_indices[target_name] = elem_indices
-        X_fit = X[:, elem_indices] if elem_indices is not None else X
+                nist_local = select_wavelengths_nist(wavelengths, [target_name], delta_nm=1.0)
+                if n_pca_cols > 0:
+                    # Hybrid mode: XGBoost sees NIST columns starting after PCA section
+                    col_slice = n_pca_cols + nist_local
+                else:
+                    # Pure XGBoost mode: X is already NIST-union only
+                    col_slice = nist_local
+                print(f"    [NIST/{elem_model}] {target_name}: {len(nist_local)} channels")
+        elif n_pca_cols > 0:
+            # Hybrid mode: linear model (ridge/lasso/pls/rf) uses only PCA columns
+            col_slice = np.arange(n_pca_cols)
 
-        def objective(trial, _y=y_single, _inv=inv_fn, _y_orig=y_orig_single, _X=X_fit):
-            if model_name == "ridge":
+        per_element_indices[target_name] = col_slice
+        X_fit = X[:, col_slice] if col_slice is not None else X
+        print(f"    Model: {elem_model}, X_fit shape: {X_fit.shape}")
+
+        def objective(trial, _y=y_single, _inv=inv_fn, _y_orig=y_orig_single,
+                      _X=X_fit, _model_type=elem_model):
+            if _model_type == "ridge":
                 alpha = trial.suggest_float("alpha", 1e-2, 1e5, log=True)
                 model = Ridge(alpha=alpha)
-            elif model_name == "lasso":
+            elif _model_type == "lasso":
                 alpha = trial.suggest_float("alpha", 1e-6, 1e2, log=True)
                 model = Lasso(alpha=alpha, max_iter=10000)
-            elif model_name == "pls":
+            elif _model_type == "pls":
                 n_components = trial.suggest_int("n_components", 5, min(50, _X.shape[0] - 1, _X.shape[1]))
                 model = PLSRegression(n_components=n_components)
-            elif model_name == "rf":
+            elif _model_type == "rf":
                 params = {
                     "n_estimators": trial.suggest_int("n_estimators", 50, 300),
                     "max_depth": trial.suggest_int("max_depth", 5, 50),
@@ -931,7 +959,7 @@ def optimize_per_target(
                     "random_state": 42,
                 }
                 model = RandomForestRegressor(**params)
-            elif model_name == "xgb":
+            elif _model_type == "xgb":
                 from xgboost import XGBRegressor
                 from src.models.traditional import _cuda_ok
                 xgb_params = {
@@ -947,7 +975,7 @@ def optimize_per_target(
                 model = XGBRegressor(**xgb_params, tree_method="hist", device=device,
                                      n_jobs=-1, verbosity=0, random_state=42)
             else:
-                raise ValueError(f"Unknown model: {model_name}")
+                raise ValueError(f"Unknown model: {_model_type}")
 
             if _inv is not None and _y_orig is not None:
                 # Compute RMSE in original space (e.g., after inverse logit)
@@ -967,22 +995,22 @@ def optimize_per_target(
         best_score = study.best_value
 
         # Build final model with best params
-        if model_name == "ridge":
+        if elem_model == "ridge":
             model = Ridge(**best_params)
-        elif model_name == "lasso":
+        elif elem_model == "lasso":
             model = Lasso(**best_params, max_iter=10000)
-        elif model_name == "pls":
+        elif elem_model == "pls":
             model = PLSRegression(**best_params)
-        elif model_name == "rf":
+        elif elem_model == "rf":
             model = RandomForestRegressor(**best_params, n_jobs=-1, random_state=42)
-        elif model_name == "xgb":
+        elif elem_model == "xgb":
             from xgboost import XGBRegressor
             from src.models.traditional import _cuda_ok
             device = "cuda" if _cuda_ok() else "cpu"
             model = XGBRegressor(**best_params, tree_method="hist", device=device,
                                  n_jobs=-1, verbosity=0, random_state=42)
         else:
-            raise ValueError(f"Unknown model: {model_name}")
+            raise ValueError(f"Unknown model: {elem_model}")
 
         model.fit(X_fit, y_single)
         models_list.append(model)
