@@ -25,3 +25,6 @@ tqdm>=4.62
 
 # Interpretability (OES-013)
 shap>=0.44
+
+# NetCDF support (OES-015: BOSCH plasma etching dataset)
+netCDF4>=1.6

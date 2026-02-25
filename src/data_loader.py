@@ -312,6 +312,131 @@ def load_mesbah_cap(
     return X, y, wavelengths_nm
 
 
+def load_bosch_oes(
+    path: Union[str, Path],
+    wafer_key: Optional[str] = None,
+    day_file: Optional[str] = None,
+) -> dict:
+    """Load BOSCH plasma etching OES dataset from NetCDF files.
+
+    File structure:
+      <day>.nc / <WaferGroup>:
+        times       : (T,)       Unix epoch timestamps (s)
+        wavelengths : (3648,)    nm, range ~185.9–884.0 nm
+        data        : (T, 3648)  uint16 OES intensity counts at 25 Hz
+
+      Process_data.nc / <day>_<WaferGroup>:
+        times       : (Tp,)      relative timestamps (s from experiment start)
+        feature     : (n_feat,)  string feature names
+        data        : (Tp, n_feat) uint16 process parameter counts
+
+    Args:
+        path: Directory containing Day_*.nc and Process_data.nc files.
+        wafer_key: Wafer group name (e.g. 'Wafer_01'). Defaults to first group.
+        day_file: Name of the Day NetCDF file (e.g. 'Day_2024_07_02.nc').
+                  Defaults to the first Day_*.nc file found.
+
+    Returns:
+        dict with keys:
+          'spectra'       : (T, 3648) float32 OES intensities
+          'wavelengths'   : (3648,) float64 wavelengths in nm
+          'timestamps'    : (T,) float64 Unix epoch timestamps
+          'process_params': (T, n_features) float32 process params interpolated
+                            to OES time grid (nearest-neighbour)
+          'process_feature_names': list[str] — names of process parameter columns
+          'day_file'      : str — loaded day filename
+          'wafer_key'     : str — loaded wafer group key
+    """
+    try:
+        import netCDF4 as nc_lib
+    except ImportError:
+        raise ImportError("netCDF4 is required. Install with: pip install netCDF4")
+
+    path = Path(path)
+
+    # Find Day NetCDF file
+    if day_file is None:
+        day_files = sorted(path.glob("Day_*.nc"))
+        if not day_files:
+            raise FileNotFoundError(f"No Day_*.nc files found in {path}")
+        day_path = day_files[0]
+    else:
+        day_path = path / day_file
+
+    # Load OES spectra from Day file
+    with nc_lib.Dataset(str(day_path)) as ds:
+        if wafer_key is None:
+            wafer_key = sorted(ds.groups.keys())[0]
+        grp = ds[wafer_key]
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            times = np.array(grp["times"]).astype(np.float64)
+            wavelengths = np.array(grp["wavelengths"]).astype(np.float64)
+            spectra = np.array(grp["data"]).astype(np.float32)  # (T, 3648)
+
+    # Build process_params key name
+    stem = day_path.stem  # e.g. 'Day_2024_07_02'
+    proc_key = f"{stem}_{wafer_key}"  # e.g. 'Day_2024_07_02_Wafer_01'
+
+    proc_params = None
+    proc_feature_names: List[str] = []
+
+    proc_path = path / "Process_data.nc"
+    if proc_path.exists():
+        try:
+            with nc_lib.Dataset(str(proc_path)) as pds:
+                if proc_key in pds.groups:
+                    pg = pds[proc_key]
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        p_times = np.array(pg["times"]).astype(np.float64)
+                        p_data = np.array(pg["data"]).astype(np.float32)  # (Tp, n_feat)
+                        p_feat = list(np.array(pg["feature"]).astype(str))
+                    proc_feature_names = p_feat
+
+                    # Interpolate process params to OES time grid using nearest-neighbour.
+                    # OES uses Unix epoch; process data uses experiment-relative seconds.
+                    # Align by normalising both to [0, 1] fractional experiment time.
+                    from scipy.interpolate import interp1d
+                    oes_rel = times - times[0]              # 0 .. duration_s
+                    p_rel_norm = (p_times - p_times[0])     # already relative
+
+                    # Scale process time to match OES duration span
+                    oes_dur = oes_rel[-1]
+                    p_dur = p_rel_norm[-1]
+                    if p_dur > 0:
+                        p_rel_scaled = p_rel_norm * (oes_dur / p_dur)
+                    else:
+                        p_rel_scaled = p_rel_norm
+
+                    proc_params = np.zeros((len(times), p_data.shape[1]), dtype=np.float32)
+                    for j in range(p_data.shape[1]):
+                        interp = interp1d(
+                            p_rel_scaled, p_data[:, j],
+                            kind="nearest",
+                            fill_value=(p_data[0, j], p_data[-1, j]),
+                            bounds_error=False,
+                        )
+                        proc_params[:, j] = interp(oes_rel)
+        except Exception:
+            proc_params = None
+
+    if proc_params is None:
+        proc_params = np.zeros((len(times), 0), dtype=np.float32)
+
+    return {
+        "spectra": spectra,
+        "wavelengths": wavelengths,
+        "timestamps": times,
+        "process_params": proc_params,
+        "process_feature_names": proc_feature_names,
+        "day_file": day_path.name,
+        "wafer_key": wafer_key,
+    }
+
+
 def load_large_csv(
     filepath: Union[str, Path],
     chunksize: int = 500,

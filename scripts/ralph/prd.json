@@ -218,7 +218,7 @@
       "id": "OES-015",
       "title": "BOSCH plasma etching NetCDF loader + PCA temporal embedding (WP5 start)",
       "priority": 15,
-      "passes": false,
+      "passes": true,
       "notes": "BOSCH dataset: https://zenodo.org/records/17122442 — CC-BY-4.0. NetCDF format, 185-884 nm, 3648 channels, 25 Hz. Download to data/bosch_oes/. Build temporal embedding: PCA(20) per time step, stack into (T, 20) tensor for each experiment run.",
       "acceptanceCriteria": [
         "data/bosch_oes/ contains at least 1 NetCDF experiment file (or download script provided)",
