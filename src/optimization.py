@@ -918,20 +918,25 @@ def optimize_per_target(
         elem_model = (model_map or {}).get(target_name, model_name)
 
         # Compute column slice in X (X may be X_combined = hstack([X_pca, X_nist]))
+        # ML-020: "pls" now routes to per-element NIST channels (same as xgb/ann)
+        #          instead of PCA columns, enabling PLS to act directly on the
+        #          element-specific spectral windows.
         col_slice = None
-        if elem_model in ("xgb", "ann") and wavelengths is not None:
-            from src.features import select_wavelengths_nist, NIST_EMISSION_LINES
+        if elem_model in ("xgb", "ann", "pls") and wavelengths is not None:
+            from src.features import select_wavelengths_nist, NIST_EMISSION_LINES, NIST_DELTA_NM
             if target_name in NIST_EMISSION_LINES:
-                nist_local = select_wavelengths_nist(wavelengths, [target_name], delta_nm=1.0)
+                nist_local = select_wavelengths_nist(
+                    wavelengths, [target_name], delta_nm=NIST_DELTA_NM
+                )
                 if n_pca_cols > 0:
-                    # Hybrid mode: XGBoost sees NIST columns starting after PCA section
+                    # Hybrid mode: model sees NIST columns starting after PCA section
                     col_slice = n_pca_cols + nist_local
                 else:
-                    # Pure XGBoost mode: X is already NIST-union only
+                    # Pure mode: X is already NIST-union only
                     col_slice = nist_local
                 print(f"    [NIST/{elem_model}] {target_name}: {len(nist_local)} channels")
-        elif n_pca_cols > 0:
-            # Hybrid mode: linear model (ridge/lasso/pls/rf) uses only PCA columns
+        elif n_pca_cols > 0 and elem_model not in ("xgb", "ann", "pls"):
+            # Hybrid mode: linear model (ridge/lasso/rf) uses only PCA columns
             col_slice = np.arange(n_pca_cols)
 
         per_element_indices[target_name] = col_slice
@@ -978,10 +983,17 @@ def optimize_per_target(
             elif _model_type == "ann":
                 from sklearn.neural_network import MLPRegressor
                 from sklearn.ensemble import BaggingRegressor
+                # ML-021: extend search to two-layer architectures
+                n_layers = trial.suggest_int("n_layers", 1, 2)
                 hidden_size = trial.suggest_int("hidden_size", 5, 50)
                 alpha = trial.suggest_float("alpha", 1e-5, 10.0, log=True)
+                if n_layers == 2:
+                    hidden_size_2 = trial.suggest_int("hidden_size_2", 5, 50)
+                    hidden_layer_sizes = (hidden_size, hidden_size_2)
+                else:
+                    hidden_layer_sizes = (hidden_size,)
                 base_ann = MLPRegressor(
-                    hidden_layer_sizes=(hidden_size,),
+                    hidden_layer_sizes=hidden_layer_sizes,
                     activation="logistic",
                     solver="lbfgs",
                     alpha=alpha,
@@ -1034,8 +1046,16 @@ def optimize_per_target(
         elif elem_model == "ann":
             from sklearn.neural_network import MLPRegressor
             from sklearn.ensemble import BaggingRegressor
+            # ML-021: reconstruct hidden_layer_sizes from best_params (1 or 2 layers)
+            n_layers = best_params.get("n_layers", 1)
+            hidden_size = best_params["hidden_size"]
+            if n_layers == 2:
+                hidden_size_2 = best_params.get("hidden_size_2", hidden_size)
+                hidden_layer_sizes = (hidden_size, hidden_size_2)
+            else:
+                hidden_layer_sizes = (hidden_size,)
             base_ann = MLPRegressor(
-                hidden_layer_sizes=(best_params["hidden_size"],),
+                hidden_layer_sizes=hidden_layer_sizes,
                 activation="logistic",
                 solver="lbfgs",
                 alpha=best_params["alpha"],

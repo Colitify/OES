@@ -71,6 +71,7 @@ def evaluate_model(
     pred_transform=None,
     y_true: Optional[np.ndarray] = None,
     n_per_target: int = 0,
+    normalize_sum100: bool = False,
 ) -> Tuple[Dict[str, Dict[str, float]], np.ndarray]:
     """Comprehensive model evaluation with cross-validation.
 
@@ -88,6 +89,10 @@ def evaluate_model(
         n_per_target: If >0, use GroupKFold (groups = rows 0..n-1 = target 0, etc.)
             and additionally compute per-target aggregated RMSE as a secondary metric
             stored in metrics["_overall"]["per_target_RMSE_mean"].
+        normalize_sum100: If True, apply closure constraint after prediction:
+            rescale each sample so that all element predictions sum to 100 wt%.
+            Based on the physical constraint that steel compositions sum to ≈100%.
+            (ML-022; Noll et al. 2014)
 
     Returns:
         Tuple of (metrics_dict, predictions_in_original_space)
@@ -106,6 +111,12 @@ def evaluate_model(
     # Inverse-transform predictions if requested (e.g. logit → wt%)
     if pred_transform is not None:
         y_pred = pred_transform(y_pred)
+
+    # ML-022: Closure constraint — rescale predictions so Σ(wt%) = 100
+    if normalize_sum100 and y_pred.ndim == 2 and y_pred.shape[1] > 1:
+        row_sums = y_pred.sum(axis=1, keepdims=True)
+        row_sums = np.where(np.abs(row_sums) < 1e-8, 1.0, row_sums)
+        y_pred = y_pred / row_sums * 100.0
 
     # Use original-space ground truth for metrics when y was transformed
     y_for_metrics = y_true if y_true is not None else y

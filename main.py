@@ -146,6 +146,29 @@ def main():
     parser.add_argument("--n_ann_ensemble", type=int, default=16,
         help="Number of ANN models in ensemble for --model ann (default 16, like FORTH)")
 
+    # Internal standard normalization (ML-018)
+    parser.add_argument("--internal_standard", action="store_true",
+        help="Divide each spectrum by the Fe 259.94 nm reference line intensity after "
+             "baseline correction + smoothing (physical shot-to-shot correction)")
+    parser.add_argument("--internal_standard_wl", type=float, default=259.94,
+        help="Wavelength (nm) of the internal standard reference line (default: Fe 259.94 nm)")
+
+    # Cr clean line selection (ML-019)
+    parser.add_argument("--cr_clean_lines", action="store_true",
+        help="Use reduced Cr NIST line set (267.716, 357.869, 425.433 nm only) "
+             "to reduce Fe-matrix interference on Cr channels")
+
+    # Cr model routing in ann_hybrid (ML-020)
+    parser.add_argument("--cr_model", type=str, default="ridge",
+        choices=["ridge", "pls"],
+        help="Model for Cr in ann_hybrid: 'ridge' (PCA features) or "
+             "'pls' (PLS on Cr NIST channels). Default: ridge (ML-016 baseline)")
+
+    # Closure constraint post-processing (ML-022)
+    parser.add_argument("--normalize_sum100", action="store_true",
+        help="After prediction, rescale element concentrations so Σ(wt%%)=100 "
+             "(closure constraint; Noll et al. 2014)")
+
     args = parser.parse_args()
 
     # Fix randomness for reproducibility
@@ -190,7 +213,12 @@ def main():
         baseline_p=args.baseline_p,
         savgol_window=args.savgol_window,
         savgol_polyorder=args.savgol_polyorder,
+        internal_standard=args.internal_standard,
+        internal_standard_wl=args.internal_standard_wl,
+        wavelengths=train_data.wavelengths,
     )
+    if args.internal_standard:
+        print(f"  Internal standard: Fe {args.internal_standard_wl:.3f} nm")
     X_train = preprocessor.fit_transform(train_data.spectra)
     print(f"  Preprocessed shape: {X_train.shape}")
 
@@ -292,13 +320,25 @@ def main():
 
         elif args.model == "ann":
             # ANN (FORTH replication): NIST features, per-element channel routing, BaggingRegressor
+            # ML-019: optionally use reduced Cr NIST lines
             print("  [ANN] Building NIST feature columns for per-element ANN...")
             fe_nist = FeatureExtractor(
                 method="wavelength_selection",
                 selection_method="nist",
                 wavelengths=train_data.wavelengths,
             )
-            X_nist = fe_nist.fit_transform(X_train, y_train)
+            if args.cr_clean_lines:
+                from src.features import NIST_EMISSION_LINES_CR_CLEAN, select_wavelengths_nist, NIST_DELTA_NM
+                _nist_idx = select_wavelengths_nist(
+                    train_data.wavelengths,
+                    delta_nm=NIST_DELTA_NM,
+                    nist_lines=NIST_EMISSION_LINES_CR_CLEAN,
+                )
+                fe_nist._selected_indices = _nist_idx
+                X_nist = fe_nist.transform(X_train)
+                print("  [ANN] Using reduced Cr NIST lines (ML-019)")
+            else:
+                X_nist = fe_nist.fit_transform(X_train, y_train)
             X_train_for_model = X_nist
             feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
             print(f"  [ANN] X_nist={X_nist.shape}")
@@ -306,21 +346,40 @@ def main():
         elif args.model == "ann_hybrid":
             # ML-016: ANN+NIST for all elements except Cr which reverts to Ridge+PCA
             # Cr degrades with ANN (5.56→6.12), all others benefit from ANN
+            # ML-019: optionally use reduced Cr NIST line set
+            # ML-020: Cr can use PLS on its NIST channels instead of Ridge+PCA
             print("  [ANN-Hybrid] Building combined PCA+NIST feature matrix...")
+            _nist_lines_override = None
+            if args.cr_clean_lines:
+                from src.features import NIST_EMISSION_LINES_CR_CLEAN
+                _nist_lines_override = NIST_EMISSION_LINES_CR_CLEAN
+                print("  [ANN-Hybrid] Using reduced Cr NIST lines (ML-019: clean lines only)")
             fe_nist = FeatureExtractor(
                 method="wavelength_selection",
                 selection_method="nist",
                 wavelengths=train_data.wavelengths,
             )
-            X_nist = fe_nist.fit_transform(X_train, y_train)
+            # If clean Cr lines requested, temporarily patch the NIST dict via fit
+            if _nist_lines_override is not None:
+                from src.features import select_wavelengths_nist, NIST_DELTA_NM
+                _nist_idx = select_wavelengths_nist(
+                    train_data.wavelengths,
+                    delta_nm=NIST_DELTA_NM,
+                    nist_lines=_nist_lines_override,
+                )
+                fe_nist._selected_indices = _nist_idx
+                X_nist = fe_nist.transform(X_train)
+            else:
+                X_nist = fe_nist.fit_transform(X_train, y_train)
             n_pca_cols = X_train_feat.shape[1]
             X_train_for_model = np.hstack([X_train_feat, X_nist])
             feat_wavelengths = train_data.wavelengths[fe_nist._selected_indices]
-            # Only Cr uses Ridge+PCA; all other 7 elements default to ANN+NIST
-            model_map = {"Cr": "ridge"}
+            # Cr model routing: ridge (default, ML-016) or pls (ML-020)
+            cr_model_choice = args.cr_model  # "ridge" or "pls"
+            model_map = {"Cr": cr_model_choice}
             print(f"  [ANN-Hybrid] X_pca={X_train_feat.shape}, X_nist={X_nist.shape}, "
                   f"X_combined={X_train_for_model.shape}")
-            print(f"  [ANN-Hybrid] Routing: Cr→Ridge+PCA, others→ANN+NIST")
+            print(f"  [ANN-Hybrid] Routing: Cr→{cr_model_choice.upper()}, others→ANN+NIST")
 
         # Fallback model_name for elements not in model_map
         if args.model == "hybrid":
@@ -454,6 +513,9 @@ def main():
                     baseline_p=opt_baseline_p,
                     savgol_window=opt_savgol_window,
                     savgol_polyorder=opt_savgol_polyorder,
+                    internal_standard=args.internal_standard,
+                    internal_standard_wl=args.internal_standard_wl,
+                    wavelengths=train_data.wavelengths,
                 )
                 X_train = preprocessor.fit_transform(train_data.spectra)
                 if test_data is not None:
@@ -529,6 +591,9 @@ def main():
                     baseline_p=opt_baseline_p,
                     savgol_window=opt_savgol_window,
                     savgol_polyorder=opt_savgol_polyorder,
+                    internal_standard=args.internal_standard,
+                    internal_standard_wl=args.internal_standard_wl,
+                    wavelengths=train_data.wavelengths,
                 )
                 X_train = preprocessor.fit_transform(train_data.spectra)
                 if test_data is not None:
@@ -595,6 +660,9 @@ def main():
                 baseline_p=opt_baseline_p,
                 savgol_window=opt_savgol_window,
                 savgol_polyorder=opt_savgol_polyorder,
+                internal_standard=args.internal_standard,
+                internal_standard_wl=args.internal_standard_wl,
+                wavelengths=train_data.wavelengths,
             )
             X_train = preprocessor.fit_transform(train_data.spectra)
             if test_data is not None:
@@ -669,6 +737,7 @@ def main():
         pred_transform=logit_transformer.inverse_transform if logit_transformer else None,
         y_true=y_for_opt if logit_transformer else None,
         n_per_target=args.n_per_target,
+        normalize_sum100=args.normalize_sum100,
     )
 
     report = generate_report(metrics, best_model_name, str(output_dir / "evaluation_report.txt"))
