@@ -1,5 +1,6 @@
 """Data loading module for OES/LIBS spectral data."""
 
+import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -150,6 +151,98 @@ def load_libs_data(
     y = df[target_cols].values if target_cols else None
 
     return wavelengths, X, y, target_cols
+
+
+def load_libs_benchmark(
+    path: Union[str, Path],
+    split: str = "train",
+    max_spectra_per_class: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Load LIBS Benchmark HDF5 dataset (Figshare, 12 classes, 40002 channels).
+
+    File structure (from official reader):
+      train.h5:
+        Wavelengths/<key>  -> (40002,) float64 wavelengths in nm
+        Spectra/<material> -> (40002, n_spectra) float64 intensities
+        Class/1            -> (n_total_spectra,) int class labels (1-based)
+
+    Args:
+        path: Directory containing train.h5 (and optionally test.h5, test_labels.csv)
+        split: "train" or "test"
+        max_spectra_per_class: If set, limit spectra per class (max 500)
+
+    Returns:
+        X: ndarray of shape (n_samples, 40002), float32
+        y: ndarray of shape (n_samples,), int64 class labels 0–11
+    """
+    import h5py
+
+    path = Path(path)
+    class_map_path = path / "class_map.json"
+
+    if split == "train":
+        h5_path = path / "train.h5"
+        if not h5_path.exists():
+            raise FileNotFoundError(
+                f"{h5_path} not found. Run data/libs_benchmark/download.py to fetch the dataset."
+            )
+        with h5py.File(h5_path, "r") as f:
+            # --- class labels (1-based ore-type IDs from Class/1 array) ---
+            raw_labels = np.array(f["Class"]["1"]).astype(np.int64)  # (n_total,) 1-based
+
+            # --- spectra (concatenate all sample spectra in sorted order) ---
+            spectra_group = f["Spectra"]
+            sample_keys = sorted(spectra_group.keys())
+            spectra_list = []
+            label_list = []
+            n_per_key = spectra_group[sample_keys[0]].shape[1]  # 500 per key
+            for i, key in enumerate(sample_keys):
+                key_labels = raw_labels[i * n_per_key: (i + 1) * n_per_key]
+                try:
+                    mat_data = spectra_group[key][:, :]  # (40002, n_spectra)
+                    n = mat_data.shape[1]
+                    if max_spectra_per_class is not None:
+                        n = min(n, max_spectra_per_class)
+                    spectra_list.append(mat_data[:, :n].T.astype(np.float32))
+                    label_list.append(key_labels[:n])
+                except OSError:
+                    # Skip corrupted/unreadable samples
+                    continue
+
+            X = np.vstack(spectra_list)  # (n_total, 40002)
+            raw_labels = np.concatenate(label_list)
+            y = (raw_labels - 1)  # convert 1-based to 0-based
+
+            # Collect class names from support tables or use integer labels
+            unique_class_ids = sorted(set(raw_labels.tolist()))
+            class_map = {str(int(c) - 1): f"class_{int(c):02d}" for c in unique_class_ids}
+
+        # Save class_map.json
+        with open(class_map_path, "w") as cm:
+            json.dump(class_map, cm, indent=2)
+
+        return X, y
+
+    else:  # test split
+        h5_path = path / "test.h5"
+        labels_path = path / "test_labels.csv"
+        if not h5_path.exists():
+            raise FileNotFoundError(f"{h5_path} not found.")
+        with h5py.File(h5_path, "r") as f:
+            unknown_group = f["UNKNOWN"]
+            sample_keys = sorted(unknown_group.keys())
+            spectra_list = []
+            for key in sample_keys:
+                mat_data = np.array(unknown_group[key])  # (40002, n_spectra)
+                spectra_list.append(mat_data.T.astype(np.float32))
+            X = np.vstack(spectra_list)
+
+        if labels_path.exists():
+            y = pd.read_csv(labels_path, header=None).values.squeeze().astype(np.int64) - 1
+        else:
+            y = np.full(X.shape[0], -1, dtype=np.int64)
+
+        return X, y
 
 
 def load_large_csv(
