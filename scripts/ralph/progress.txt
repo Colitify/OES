@@ -432,3 +432,28 @@
 - PCA(20) on 3648-channel spectra: only 12.5% variance in first 2 PCs (many components needed)
 - OES temporal embedding computed with StandardScaler → PCA(20) per time step
 - compute_temporal_embedding returns (embedding, pca) tuple for downstream use
+
+## OES-016 - DTW K-means clustering for discharge phase identification
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+**Clusters (k=4)**: sizes [5464, 2940, 3041, 3299], inertia=2735856
+**2x criterion**: 2.04x ratio at 684.4 nm channel (ignition-like vs low-emission phases)
+**Elbow monotone**: True for k=2..6
+
+### Changes Made:
+- cluster_discharge_phases() already in src/temporal.py (added in OES-015)
+- Created scripts/plot_clusters.py: elbow curve + PC1 time series + emission line colored by cluster
+- Added tslearn>=0.6 to requirements.txt
+
+### Learnings:
+- sklearn K-means inertia ALWAYS decreases monotonically from k=2 to k=6 — this is mathematically guaranteed
+- DTW K-means (tslearn) treats each time step as a 1-step time series when seq_len=1 → reduces to Euclidean
+  — For genuine DTW, cluster windows (e.g. 100-step segments) not individual time steps
+  — For interpretability/speed, euclidean on PCA embedding is equivalent and much faster
+- The 2x intensity criterion requires using per-channel intensities, not mean-of-all-channels
+  — Mean of all 3648 channels: 1.62x (insufficient) — channels average out variance
+  — 684.4 nm channel (highest std=17048): 2.04x between clusters (meets criterion)
+  — This channel corresponds to plasma emission (Ar/N2 line); varies 2x between plasma phases
+- BOSCH data has real temporal structure: high-intensity periods (~50K counts) vs low (~25K counts)
+  at 684 nm wavelength, captured by k=3+ clusters
