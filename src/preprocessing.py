@@ -1,6 +1,7 @@
 """Preprocessing module for spectral data."""
 
 import numpy as np
+from scipy.ndimage import median_filter
 from scipy.signal import savgol_filter
 from scipy.sparse.linalg import spsolve
 from scipy import sparse
@@ -146,6 +147,35 @@ def preprocess_spectrum(
 class Preprocessor(BaseEstimator, TransformerMixin):
     """Sklearn-compatible preprocessor for spectral data."""
 
+    @staticmethod
+    def cosmic_ray_removal(X: np.ndarray, threshold: float = 5.0) -> np.ndarray:
+        """Remove cosmic ray spikes from spectra using local median filtering.
+
+        A spike is detected when |spectrum[j] - local_median[j]| / sigma > threshold,
+        where local_median is computed over an 11-channel window and sigma is the
+        standard deviation of the per-channel residuals (spectrum - local_median).
+        Detected spikes are replaced by the local median value.
+
+        Args:
+            X: Spectra matrix of shape (n_samples, n_wavelengths), float32 or float64
+            threshold: Z-score threshold for spike detection (default 5.0)
+
+        Returns:
+            X_cleaned: Array of same shape with cosmic ray spikes replaced
+        """
+        result = X.copy()
+        for i in range(X.shape[0]):
+            spec = X[i].astype(np.float64)
+            local_med = median_filter(spec, size=11, mode="nearest")
+            residuals = spec - local_med
+            sigma = float(np.std(residuals))
+            if sigma < 1e-10:
+                continue
+            z_score = np.abs(residuals) / sigma
+            spike_mask = z_score > threshold
+            result[i][spike_mask] = local_med[spike_mask].astype(result.dtype)
+        return result
+
     def __init__(
         self,
         baseline: Literal["als", "none"] = "als",
@@ -155,6 +185,8 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         baseline_p: float = 0.01,
         savgol_window: int = 11,
         savgol_polyorder: int = 3,
+        cosmic_ray: bool = True,
+        cosmic_ray_threshold: float = 5.0,
         internal_standard: bool = False,
         internal_standard_wl: float = 259.94,
         wavelengths: Optional[np.ndarray] = None,
@@ -169,6 +201,8 @@ class Preprocessor(BaseEstimator, TransformerMixin):
             baseline_p: ALS asymmetry parameter
             savgol_window: Savitzky-Golay window length
             savgol_polyorder: Savitzky-Golay polynomial order
+            cosmic_ray: If True, apply cosmic ray removal as the first preprocessing step.
+            cosmic_ray_threshold: Z-score threshold for spike detection (default 5.0).
             internal_standard: If True, divide each spectrum by the intensity
                 of the reference line (Fe 259.94 nm by default) after baseline
                 correction and smoothing. Physical normalization that corrects
@@ -185,6 +219,8 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         self.baseline_p = baseline_p
         self.savgol_window = savgol_window
         self.savgol_polyorder = savgol_polyorder
+        self.cosmic_ray = cosmic_ray
+        self.cosmic_ray_threshold = cosmic_ray_threshold
         self.internal_standard = internal_standard
         self.internal_standard_wl = internal_standard_wl
         self.wavelengths = wavelengths
@@ -210,6 +246,10 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         Returns:
             Preprocessed spectra matrix
         """
+        # Step 0: Cosmic ray removal (first step, before all other preprocessing)
+        if self.cosmic_ray:
+            X = self.cosmic_ray_removal(X, threshold=self.cosmic_ray_threshold)
+
         from joblib import Parallel, delayed
         results = Parallel(n_jobs=-1, prefer="threads")(
             delayed(preprocess_spectrum)(
