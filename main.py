@@ -76,28 +76,111 @@ def run_classify(args) -> None:
         ("pca", PCA(n_components=n_components, random_state=args.seed)),
     ]
 
-    if args.model == "svm":
-        clf = SVC(kernel="rbf", C=10, gamma="scale", probability=False, random_state=args.seed)
-    elif args.model == "rf":
-        clf = RandomForestClassifier(n_estimators=100, random_state=args.seed, n_jobs=-1)
+    if args.model == "cnn":
+        # CNN classification path: PCA(200) preprocessing → Conv1DClassifier → Optuna HPO
+        import optuna
+        import torch
+        from sklearn.model_selection import train_test_split
+        from src.models.deep_learning import Conv1DClassifier, train_classifier, _get_safe_device
+
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+        # Remap labels to 0-indexed contiguous integers (required by CrossEntropyLoss)
+        classes_arr = np.unique(y)
+        n_classes = int(len(classes_arr))
+        label_map = {int(old): int(new) for new, old in enumerate(classes_arr)}
+        y_mapped = np.array([label_map[int(lbl)] for lbl in y], dtype=np.int64)
+
+        # PCA preprocessing: reduce 40002 → n_pca dims for fast CNN convergence
+        n_pca = min(200, n_components)
+        print(f"  Applying PCA({n_pca}) before CNN...")
+        pca_pre = PCA(n_components=n_pca, random_state=args.seed)
+        scaler_pre = StandardScaler()
+        X_pca = pca_pre.fit_transform(scaler_pre.fit_transform(X.astype(np.float32)))
+        print(f"  PCA reduced to {X_pca.shape}, {n_classes} classes")
+
+        device = _get_safe_device()
+        X_tr_hp, X_val_hp, y_tr_hp, y_val_hp = train_test_split(
+            X_pca, y_mapped, test_size=0.2, stratify=y_mapped, random_state=args.seed
+        )
+
+        def _cnn_objective(trial):
+            n_filters = trial.suggest_categorical("n_filters", [32, 64, 128])
+            kernel_size = trial.suggest_categorical("kernel_size", [3, 7, 11])
+            dropout = trial.suggest_float("dropout", 0.1, 0.5)
+            lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+            clf_model = Conv1DClassifier(
+                n_classes=n_classes, n_filters=n_filters, kernel_size=kernel_size,
+                dropout=dropout, lr=lr,
+            )
+            trained = train_classifier(
+                clf_model, X_tr_hp, y_tr_hp, X_val_hp, y_val_hp,
+                epochs=20, batch_size=64, device=device,
+            )
+            trained.eval()
+            with torch.no_grad():
+                preds = trained(torch.FloatTensor(X_val_hp).to(device)).argmax(dim=1).cpu().numpy()
+            return float(f1_score(y_val_hp, preds, average="micro"))
+
+        n_hpo_trials = getattr(args, "n_trials", 20)
+        print(f"\n[3/4] Optuna HPO: {n_hpo_trials} trials...")
+        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=args.seed))
+        study.optimize(_cnn_objective, n_trials=n_hpo_trials, show_progress_bar=False)
+        best_params = study.best_params
+        print(f"  Best HPO params: {best_params}  (val micro_f1={study.best_value:.4f})")
+
+        # 5-fold CV with best params
+        print(f"\n[4/4] {args.cv}-fold stratified CV with best CNN params...")
+        cv_kf = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=args.seed)
+        y_pred = np.zeros(len(y_mapped), dtype=np.int64)
+        for fold_i, (tr_idx, val_idx) in enumerate(cv_kf.split(X_pca, y_mapped)):
+            clf_model = Conv1DClassifier(
+                n_classes=n_classes, n_filters=best_params["n_filters"],
+                kernel_size=best_params["kernel_size"], dropout=best_params["dropout"],
+                lr=best_params["lr"],
+            )
+            trained = train_classifier(
+                clf_model, X_pca[tr_idx], y_mapped[tr_idx],
+                X_pca[val_idx], y_mapped[val_idx],
+                epochs=30, batch_size=64, device=device,
+            )
+            trained.eval()
+            with torch.no_grad():
+                preds = trained(torch.FloatTensor(X_pca[val_idx]).to(device)).argmax(dim=1).cpu().numpy()
+            y_pred[val_idx] = preds
+            fold_f1 = float(f1_score(y_mapped[val_idx], preds, average="micro"))
+            print(f"  Fold {fold_i+1}/{args.cv}: micro_f1={fold_f1:.4f}")
+
+        micro_f1 = float(f1_score(y_mapped, y_pred, average="micro"))
+        macro_f1 = float(f1_score(y_mapped, y_pred, average="macro"))
+        acc = float(accuracy_score(y_mapped, y_pred))
+        per_class_f1 = {
+            f"class_{int(c):02d}": float(f1_score(y_mapped, y_pred, labels=[c], average="micro"))
+            for c in sorted(set(y_mapped.tolist()))
+        }
     else:
-        raise ValueError(f"Unknown classify model: {args.model}. Use 'svm' or 'rf'.")
+        if args.model == "svm":
+            clf = SVC(kernel="rbf", C=10, gamma="scale", probability=False, random_state=args.seed)
+        elif args.model == "rf":
+            clf = RandomForestClassifier(n_estimators=100, random_state=args.seed, n_jobs=-1)
+        else:
+            raise ValueError(f"Unknown classify model: {args.model}. Use 'svm', 'rf', or 'cnn'.")
 
-    model = Pipeline(pipeline_steps + [("clf", clf)])
+        model = Pipeline(pipeline_steps + [("clf", clf)])
 
-    # --- Cross-validation ---
-    print(f"\n[3/3] {args.cv}-fold stratified CV with {args.model.upper()}...")
-    cv = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=args.seed)
-    y_pred = cross_val_predict(model, X, y, cv=cv, n_jobs=1)
+        # --- Cross-validation ---
+        print(f"\n[3/3] {args.cv}-fold stratified CV with {args.model.upper()}...")
+        cv = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=args.seed)
+        y_pred = cross_val_predict(model, X, y, cv=cv, n_jobs=1)
 
-    micro_f1 = float(f1_score(y, y_pred, average="micro"))
-    macro_f1 = float(f1_score(y, y_pred, average="macro"))
-    acc = float(accuracy_score(y, y_pred))
-    classes = sorted(set(y.tolist()))
-    per_class_f1 = {
-        f"class_{int(c):02d}": float(f1_score(y, y_pred, labels=[c], average="micro"))
-        for c in classes
-    }
+        micro_f1 = float(f1_score(y, y_pred, average="micro"))
+        macro_f1 = float(f1_score(y, y_pred, average="macro"))
+        acc = float(accuracy_score(y, y_pred))
+        classes = sorted(set(y.tolist()))
+        per_class_f1 = {
+            f"class_{int(c):02d}": float(f1_score(y, y_pred, labels=[c], average="micro"))
+            for c in classes
+        }
 
     print(f"\n  micro_f1  = {micro_f1:.4f}")
     print(f"  macro_f1  = {macro_f1:.4f}")

@@ -200,6 +200,139 @@ class TransformerRegressor(nn.Module):
         return self.fc(x)
 
 
+class Conv1DClassifier(nn.Module):
+    """1D CNN for spectral classification with softmax output.
+
+    Architecture: Input → Conv1D×3 (stride=4 each) → GlobalAvgPool → Dense(128) → Dropout → Dense(n_classes)
+
+    Args:
+        n_classes: Number of output classes.
+        n_filters: Number of convolutional filters (default 32).
+        kernel_size: Convolutional kernel size (default 7).
+        dropout: Dropout probability before the final FC layer (default 0.3).
+        lr: Learning rate for Adam optimizer during training (default 1e-3).
+    """
+
+    def __init__(
+        self,
+        n_classes: int,
+        n_filters: int = 32,
+        kernel_size: int = 7,
+        dropout: float = 0.3,
+        lr: float = 1e-3,
+    ):
+        super().__init__()
+        self.n_classes = n_classes
+        self.n_filters = n_filters
+        self.kernel_size = kernel_size
+        self.dropout = dropout
+        self.lr = lr
+
+        pad = kernel_size // 2
+        self.conv = nn.Sequential(
+            nn.Conv1d(1, n_filters, kernel_size, stride=4, padding=pad),
+            nn.BatchNorm1d(n_filters),
+            nn.ReLU(),
+            nn.Conv1d(n_filters, n_filters, kernel_size, stride=4, padding=pad),
+            nn.BatchNorm1d(n_filters),
+            nn.ReLU(),
+            nn.Conv1d(n_filters, n_filters, kernel_size, stride=4, padding=pad),
+            nn.BatchNorm1d(n_filters),
+            nn.ReLU(),
+        )
+        self.pool = nn.AdaptiveAvgPool1d(1)   # GlobalAvgPool → (batch, n_filters, 1)
+        self.fc = nn.Sequential(
+            nn.Linear(n_filters, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, n_classes),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() == 2:
+            x = x.unsqueeze(1)          # (batch, 1, length)
+        x = self.conv(x)                # (batch, n_filters, reduced_length)
+        x = self.pool(x).squeeze(-1)    # (batch, n_filters)
+        return self.fc(x)               # (batch, n_classes) — raw logits
+
+
+def train_classifier(
+    model: "Conv1DClassifier",
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: Optional[np.ndarray] = None,
+    y_val: Optional[np.ndarray] = None,
+    epochs: int = 50,
+    batch_size: int = 64,
+    device: Optional[str] = None,
+) -> "Conv1DClassifier":
+    """Train a Conv1DClassifier with CrossEntropyLoss and early stopping.
+
+    Args:
+        model: Conv1DClassifier instance (lr taken from model.lr).
+        X_train: Training spectra (n_samples, n_wavelengths), float32.
+        y_train: Integer class labels (n_samples,).
+        X_val: Validation spectra for early stopping (optional).
+        y_val: Validation labels (optional).
+        epochs: Maximum number of training epochs.
+        batch_size: Mini-batch size.
+        device: PyTorch device string; auto-detected if None.
+
+    Returns:
+        Trained model (best checkpoint restored if validation provided).
+    """
+    if device is None:
+        device = _get_safe_device()
+    model = model.to(device)
+
+    X_t = torch.FloatTensor(X_train).to(device)
+    y_t = torch.LongTensor(y_train.astype(np.int64)).to(device)
+    train_loader = DataLoader(TensorDataset(X_t, y_t), batch_size=batch_size, shuffle=True)
+
+    if X_val is not None and y_val is not None:
+        X_val_t = torch.FloatTensor(X_val).to(device)
+        y_val_t = torch.LongTensor(y_val.astype(np.int64)).to(device)
+        val_loader = DataLoader(TensorDataset(X_val_t, y_val_t), batch_size=batch_size)
+    else:
+        val_loader = None
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=model.lr, weight_decay=1e-4)
+
+    best_val_acc = -1.0
+    best_state = None
+    patience = max(3, epochs // 10)
+    patience_counter = 0
+
+    for epoch in range(epochs):
+        model.train()
+        for X_b, y_b in train_loader:
+            optimizer.zero_grad()
+            criterion(model(X_b), y_b).backward()
+            optimizer.step()
+
+        if val_loader is not None:
+            model.eval()
+            correct = total = 0
+            with torch.no_grad():
+                for X_b, y_b in val_loader:
+                    correct += (model(X_b).argmax(dim=1) == y_b).sum().item()
+                    total += len(y_b)
+            val_acc = correct / total
+            if val_acc > best_val_acc:
+                best_val_acc = val_acc
+                best_state = {k: v.clone() for k, v in model.state_dict().items()}
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    break
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    return model
+
+
 def train_deep_model(
     model: nn.Module,
     X_train: np.ndarray,
