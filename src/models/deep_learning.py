@@ -333,6 +333,47 @@ def train_classifier(
     return model
 
 
+def predict_with_uncertainty(
+    model: "Conv1DClassifier",
+    X: np.ndarray,
+    n_samples: int = 50,
+    device: Optional[str] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """MC-Dropout uncertainty estimation for Conv1DClassifier.
+
+    Runs n_samples stochastic forward passes with dropout enabled (model in
+    training mode) and returns the mean and std of the resulting class
+    probability distributions.
+
+    Args:
+        model: Trained Conv1DClassifier (dropout layers kept active).
+        X: Input spectra (n_inputs, n_wavelengths), float32.
+        n_samples: Number of MC dropout samples (default 50).
+        device: PyTorch device; auto-detected if None.
+
+    Returns:
+        mean_probs: (n_inputs, n_classes) mean softmax probabilities.
+        std_probs:  (n_inputs, n_classes) std of softmax probabilities.
+    """
+    if device is None:
+        device = _get_safe_device()
+    model.to(device)
+    model.train()  # Keep dropout active during inference
+
+    X_t = torch.FloatTensor(X).to(device)
+    all_probs: List = []
+    with torch.no_grad():
+        for _ in range(n_samples):
+            logits = model(X_t)
+            probs = torch.softmax(logits, dim=1).cpu().numpy()
+            all_probs.append(probs)
+
+    all_probs_arr = np.stack(all_probs)   # (n_samples, n_inputs, n_classes)
+    mean_probs = all_probs_arr.mean(axis=0)
+    std_probs = all_probs_arr.std(axis=0)
+    return mean_probs, std_probs
+
+
 def train_deep_model(
     model: nn.Module,
     X_train: np.ndarray,
