@@ -43,18 +43,114 @@ def get_git_sha() -> str | None:
         return None
 
 
+def run_classify(args) -> None:
+    """Execute classification pipeline (--task classify)."""
+    from sklearn.decomposition import PCA
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import f1_score, accuracy_score, confusion_matrix
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.svm import SVC
+
+    from src.data_loader import load_libs_benchmark
+
+    print("=" * 60)
+    print("OES Classification Pipeline")
+    print("=" * 60)
+
+    # --- Load data ---
+    print("\n[1/3] Loading data...")
+    train_path = Path(args.train)
+    if train_path.suffix in (".h5", ".hdf5"):
+        X, y = load_libs_benchmark(str(train_path.parent), split="train")
+    else:
+        raise ValueError(f"Unsupported file format for classify task: {train_path.suffix}. Use .h5 files.")
+    print(f"  Loaded: X={X.shape}, classes={len(set(y.tolist()))}")
+
+    # --- Feature extraction ---
+    print("\n[2/3] Feature extraction (PCA)...")
+    n_components = args.n_components
+    pipeline_steps = [
+        ("scaler", StandardScaler()),
+        ("pca", PCA(n_components=n_components, random_state=args.seed)),
+    ]
+
+    if args.model == "svm":
+        clf = SVC(kernel="rbf", C=10, gamma="scale", probability=False, random_state=args.seed)
+    elif args.model == "rf":
+        clf = RandomForestClassifier(n_estimators=100, random_state=args.seed, n_jobs=-1)
+    else:
+        raise ValueError(f"Unknown classify model: {args.model}. Use 'svm' or 'rf'.")
+
+    model = Pipeline(pipeline_steps + [("clf", clf)])
+
+    # --- Cross-validation ---
+    print(f"\n[3/3] {args.cv}-fold stratified CV with {args.model.upper()}...")
+    cv = StratifiedKFold(n_splits=args.cv, shuffle=True, random_state=args.seed)
+    y_pred = cross_val_predict(model, X, y, cv=cv, n_jobs=1)
+
+    micro_f1 = float(f1_score(y, y_pred, average="micro"))
+    macro_f1 = float(f1_score(y, y_pred, average="macro"))
+    acc = float(accuracy_score(y, y_pred))
+    classes = sorted(set(y.tolist()))
+    per_class_f1 = {
+        f"class_{int(c):02d}": float(f1_score(y, y_pred, labels=[c], average="micro"))
+        for c in classes
+    }
+
+    print(f"\n  micro_f1  = {micro_f1:.4f}")
+    print(f"  macro_f1  = {macro_f1:.4f}")
+    print(f"  accuracy  = {acc:.4f}")
+
+    # --- Write metrics.json ---
+    if args.metrics_out:
+        payload = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "git_sha": get_git_sha(),
+            "model": args.model,
+            "task": "classify",
+            "cv_folds": args.cv,
+            "seed": args.seed,
+            "primary_metric": {"name": "micro_f1", "value": micro_f1},
+            "metrics": {
+                "micro_f1": micro_f1,
+                "macro_f1": macro_f1,
+                "accuracy": acc,
+                "per_class_f1": per_class_f1,
+            },
+        }
+        out_path = Path(args.metrics_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"  Wrote metrics json to {out_path}")
+
+    print("\n" + "=" * 60)
+    print("Classification pipeline completed!")
+    print("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="OES/LIBS Spectral Analysis Pipeline")
-    parser.add_argument("--train", type=str, required=True, help="Path to training data CSV")
-    parser.add_argument("--test", type=str, default=None, help="Path to test data CSV")
+    parser.add_argument("--train", type=str, required=True, help="Path to training data")
+    parser.add_argument("--test", type=str, default=None, help="Path to test data")
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="regress",
+        choices=["classify", "regress", "temporal"],
+        help="Task type: classify (LIBS 12-class), regress (CAP temperatures), temporal (BOSCH time-series)",
+    )
     parser.add_argument("--n_wavelengths", type=int, default=40002, help="Number of wavelength columns")
     parser.add_argument("--target_cols", type=str, nargs="+", default=None, help="Target column names")
+    parser.add_argument("--target", type=str, default=None,
+                        help="Target column name for regress task (e.g. T_rot, T_vib, substrate_type)")
     parser.add_argument(
         "--model",
         type=str,
         default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "cnn", "xgb", "hybrid", "ann", "ann_hybrid", "all"],
-        help="Model to train (cnn = 1D-CNN, xgb = XGBoost, hybrid = per-element Ridge/XGBoost, ann = NIST+ANN ensemble, ann_hybrid = ANN+NIST for all except Cr→Ridge+PCA)",
+        choices=["pls", "ridge", "lasso", "rf", "svm", "cnn", "xgb", "hybrid", "ann", "ann_hybrid", "all"],
+        help="Model to train (svm/rf for classify; ridge/pls/ann etc. for regress)",
     )
     parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
     parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
@@ -174,6 +270,11 @@ def main():
     # Fix randomness for reproducibility
     random.seed(args.seed)
     np.random.seed(args.seed)
+
+    # Route to task-specific handler
+    if args.task == "classify":
+        run_classify(args)
+        return
 
     # Create output directories
     output_dir = Path(args.output_dir)
