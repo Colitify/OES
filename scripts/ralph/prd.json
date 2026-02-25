@@ -204,6 +204,89 @@
       "priority": 15,
       "passes": true,
       "notes": "RMSE_mean improved 2.403 → 2.282 (5.1%), per_target_RMSE_mean 2.036 → 1.941 (4.7%). Cr fixed: 6.118 → 5.145 (-16%), all other elements unchanged (same ANN+NIST). model_map={'Cr':'ridge'}, eff_model_name='ann'. CURRENT BEST."
+    },
+    {
+      "id": "ML-017",
+      "title": "C₂ Swan molecular bands + per-element NIST window widths",
+      "acceptanceCriteria": [
+        "NIST_EMISSION_LINES['C'] extended with C₂ Swan band heads: 388.34, 473.71, 516.52, 563.59 nm",
+        "NIST_DELTA_NM dict defined: C → 3.0 nm, all others → 1.0 nm",
+        "NIST_EMISSION_LINES_CR_CLEAN defined with 3 clean Cr lines",
+        "select_wavelengths_nist() accepts delta_nm as float or dict",
+        "FeatureExtractor uses NIST_DELTA_NM when selection_method='nist'",
+        "RMSE_mean does not regress vs baseline 2.282 (guardrail --tol 0.05)"
+      ],
+      "priority": 16,
+      "passes": false,
+      "notes": "C R²=0.094 is the biggest bottleneck. Atomic C line at 247.856 nm has very low SNR at <1 wt%. C₂ Swan bands (Ctvrtnickova 2010; Runge 2021) and CN violet (388 nm) are more sensitive to low C content. Wider 3 nm window captures molecular band structure. Also adds NIST_EMISSION_LINES_CR_CLEAN for ML-019."
+    },
+    {
+      "id": "ML-018",
+      "title": "Internal standard normalization (Fe 259.94 nm)",
+      "acceptanceCriteria": [
+        "preprocess_spectrum() accepts internal_standard and internal_standard_idx params",
+        "Preprocessor accepts internal_standard, internal_standard_wl, wavelengths params",
+        "Preprocessor.fit() locates reference channel index from wavelengths",
+        "CLI: --internal_standard (flag) and --internal_standard_wl (default 259.94)",
+        "Internal standard applied after baseline+smoothing, before SNV",
+        "All Preprocessor rebuilds in two-stage optimization also pass the params",
+        "RMSE_mean does not regress vs baseline 2.282 (guardrail --tol 0.05)"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Physical shot-to-shot normalization complementing data-driven SNV. Fe 259.939 nm is stable and strong in steel OES. Ciucci et al. 1999 shows internal standard reduces plasma fluctuation noise. Expects incremental improvement across all elements."
+    },
+    {
+      "id": "ML-019",
+      "title": "Reduced Cr NIST line set (interference-free lines only)",
+      "acceptanceCriteria": [
+        "NIST_EMISSION_LINES_CR_CLEAN = {**NIST_EMISSION_LINES, 'Cr': [267.716, 357.869, 425.433]}",
+        "CLI: --cr_clean_lines flag enables the reduced line set",
+        "--cr_clean_lines applies to both --model ann and --model ann_hybrid",
+        "RMSE_mean (Cr) improves vs baseline 5.145"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Current 12 Cr lines include several with Fe interference (301.520 is 0.5 nm from Fe 302.064; 357.869 is 0.25 nm from Fe 358.119). Reducing to 3 clean lines (267.716, 357.869, 425.433) forces the model to use high-SNR Cr channels only. Low complexity, tests whether line count reduction beats noise reduction from having more lines."
+    },
+    {
+      "id": "ML-020",
+      "title": "PLS on Cr NIST channels as alternative to Ridge+PCA",
+      "acceptanceCriteria": [
+        "'pls' model type added to NIST channel routing in optimize_per_target (same as xgb/ann)",
+        "CLI: --cr_model pls routes Cr to PLS+NIST instead of Ridge+PCA in ann_hybrid",
+        "optimize_per_target correctly slices Cr NIST channels for PLS",
+        "RMSE (Cr) improves vs Ridge+PCA baseline 5.145"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "PLS is purpose-designed for collinear spectral regression (Wold et al. 2001). Ridge+PCA(50) for Cr compresses away element-specific info; PLS acting on Cr's NIST channels (~30 channels at ±3nm or ~14 at ±1nm) retains the full covariance structure. n_components searched by Optuna. CLI: --model ann_hybrid --per_target --cr_model pls --n_trials 20"
+    },
+    {
+      "id": "ML-021",
+      "title": "Two-layer ANN architecture search",
+      "acceptanceCriteria": [
+        "ANN objective in optimize_per_target searches n_layers ∈ {1, 2}",
+        "When n_layers=2, hidden_size_2 is also searched in [5, 50]",
+        "Final model building reads n_layers and hidden_size_2 from best_params",
+        "RMSE_mean improves or stays within tolerance vs baseline 2.282"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Current single hidden layer (5-50 nodes) may underfit complex element-specific spectral patterns. Two-layer architecture gives the ANN capacity to learn non-linear feature hierarchies. Hansen (2003) CMA-ES note: user can increase --n_trials 50 to explore wider. Backward compatible: n_layers=1 replicates ML-016."
+    },
+    {
+      "id": "ML-022",
+      "title": "Closure constraint post-processing (Σ wt% = 100)",
+      "acceptanceCriteria": [
+        "evaluate_model() accepts normalize_sum100: bool parameter",
+        "When normalize_sum100=True, y_pred rescaled per sample: y_pred = y_pred / sum * 100",
+        "CLI: --normalize_sum100 flag",
+        "RMSE_mean improves vs baseline 2.282"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Steel composition satisfies Σ(wt%) ≈ 100. Each element is currently predicted independently with no inter-element constraint. Post-hoc rescaling adds this physical prior at zero training cost. Noll et al. 2014 reports 1-5% RMSE reduction. Risk: if ground-truth labels don't precisely sum to 100 (measurement error), over-constraining may hurt. Validate on per_target_RMSE_mean."
     }
   ]
 }

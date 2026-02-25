@@ -88,7 +88,9 @@ def preprocess_spectrum(
     baseline_lam: float = 1e6,
     baseline_p: float = 0.01,
     savgol_window: int = 11,
-    savgol_polyorder: int = 3
+    savgol_polyorder: int = 3,
+    internal_standard: bool = False,
+    internal_standard_idx: int = -1,
 ) -> np.ndarray:
     """Standard preprocessing pipeline for a single spectrum.
 
@@ -102,6 +104,11 @@ def preprocess_spectrum(
         baseline_p: ALS asymmetry parameter
         savgol_window: Savitzky-Golay window length
         savgol_polyorder: Savitzky-Golay polynomial order
+        internal_standard: Whether to apply internal standard normalization
+            (divide by intensity at the reference line). Applied after baseline
+            correction and smoothing, before SNV/minmax/l2 normalization.
+        internal_standard_idx: Channel index of the reference spectral line.
+            Typically Fe 259.94 nm. Ignored when internal_standard=False.
 
     Returns:
         Preprocessed spectrum
@@ -117,7 +124,15 @@ def preprocess_spectrum(
     if smoothing:
         result = savgol_filter(result, window_length=savgol_window, polyorder=savgol_polyorder)
 
-    # 3. Normalization
+    # 3. Internal standard normalization (ML-018)
+    #    Divide by a stable Fe line (physical, shot-to-shot correction).
+    #    Complementary to the data-driven SNV that follows.
+    if internal_standard and internal_standard_idx >= 0:
+        ref = result[internal_standard_idx]
+        if abs(ref) > 1e-10:
+            result = result / ref
+
+    # 4. Normalization
     if normalization == "snv":
         result = snv_normalize(result)
     elif normalization == "minmax":
@@ -139,7 +154,10 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         baseline_lam: float = 1e6,
         baseline_p: float = 0.01,
         savgol_window: int = 11,
-        savgol_polyorder: int = 3
+        savgol_polyorder: int = 3,
+        internal_standard: bool = False,
+        internal_standard_wl: float = 259.94,
+        wavelengths: Optional[np.ndarray] = None,
     ):
         """Initialize preprocessor.
 
@@ -151,6 +169,14 @@ class Preprocessor(BaseEstimator, TransformerMixin):
             baseline_p: ALS asymmetry parameter
             savgol_window: Savitzky-Golay window length
             savgol_polyorder: Savitzky-Golay polynomial order
+            internal_standard: If True, divide each spectrum by the intensity
+                of the reference line (Fe 259.94 nm by default) after baseline
+                correction and smoothing. Physical normalization that corrects
+                for shot-to-shot laser/plasma energy fluctuations. (ML-018)
+            internal_standard_wl: Wavelength (nm) of the internal standard
+                reference line. Default Fe 259.94 nm.
+            wavelengths: Wavelength array (nm) of the spectra. Required when
+                internal_standard=True to locate the reference channel index.
         """
         self.baseline = baseline
         self.normalize = normalize
@@ -159,9 +185,20 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         self.baseline_p = baseline_p
         self.savgol_window = savgol_window
         self.savgol_polyorder = savgol_polyorder
+        self.internal_standard = internal_standard
+        self.internal_standard_wl = internal_standard_wl
+        self.wavelengths = wavelengths
+        self._internal_standard_idx: int = -1
 
     def fit(self, X: np.ndarray, y=None):
-        """Fit the preprocessor (no-op for stateless preprocessing)."""
+        """Fit the preprocessor.
+
+        Locates the internal standard channel index if internal_standard=True.
+        """
+        if self.internal_standard and self.wavelengths is not None:
+            self._internal_standard_idx = int(
+                np.argmin(np.abs(self.wavelengths - self.internal_standard_wl))
+            )
         return self
 
     def transform(self, X: np.ndarray) -> np.ndarray:
@@ -184,6 +221,8 @@ class Preprocessor(BaseEstimator, TransformerMixin):
                 baseline_p=self.baseline_p,
                 savgol_window=self.savgol_window,
                 savgol_polyorder=self.savgol_polyorder,
+                internal_standard=self.internal_standard,
+                internal_standard_idx=self._internal_standard_idx,
             )
             for i in range(X.shape[0])
         )

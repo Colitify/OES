@@ -5,13 +5,19 @@ from scipy.signal import find_peaks
 from sklearn.decomposition import PCA
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.base import BaseEstimator, TransformerMixin
-from typing import Optional, Tuple, List, Literal, Union
+from typing import Optional, Tuple, List, Literal, Union, Dict
 
 
 # NIST Atomic Spectra Database — strongest lines in 200–1000 nm for steel elements
 # Source: NIST ASD (https://physics.nist.gov/asd), arc/spark conditions
+# ML-017: C extended with C₂ Swan molecular band heads and CN violet system.
+#   C₂ Swan: Δv=+1 head 473.71 nm; Δv=0 head 516.52 nm; Δv=-1 head 563.59 nm
+#   CN violet: (0,0) head 388.34 nm
+#   These molecular bands form during plasma cooling and are more sensitive to
+#   low C concentrations than the weak 247.856 nm atomic line alone.
+#   (Ctvrtnickova et al. 2010; Runge et al. 2021)
 NIST_EMISSION_LINES = {
-    "C":  [247.856],
+    "C":  [247.856, 388.34, 473.71, 516.52, 563.59],
     "Si": [212.412, 243.515, 250.690, 251.432, 252.411, 252.852, 288.158],
     "Mn": [257.610, 259.373, 260.569, 279.482, 279.827, 280.106,
            403.076, 403.307, 403.449],
@@ -25,6 +31,28 @@ NIST_EMISSION_LINES = {
     "Fe": [238.204, 239.562, 240.488, 248.814, 259.939, 260.709,
            271.442, 302.064, 358.119, 371.994, 373.487, 374.556,
            375.824, 381.584, 382.044, 404.581, 438.355],
+}
+
+# ML-017: Per-element NIST window half-widths (nm).
+# C uses a wider window because the C₂ Swan bands are broad molecular features.
+# All other elements use ±1.0 nm (sufficient for sharp atomic lines in OES).
+NIST_DELTA_NM: Dict[str, float] = {
+    "C": 3.0,
+    "Si": 1.0,
+    "Mn": 1.0,
+    "Cr": 1.0,
+    "Mo": 1.0,
+    "Ni": 1.0,
+    "Cu": 1.0,
+    "Fe": 1.0,
+}
+
+# ML-019: Reduced Cr line set — only lines with minimal Fe-matrix interference.
+# Removes lines at 283-301 nm and 357-360 nm where dense Fe lines overlap.
+# Recommended by NIST ASD and OES literature for high-Fe matrices.
+NIST_EMISSION_LINES_CR_CLEAN: Dict[str, list] = {
+    **NIST_EMISSION_LINES,
+    "Cr": [267.716, 357.869, 425.433],
 }
 
 
@@ -223,25 +251,38 @@ def select_wavelengths_sdvs(
 def select_wavelengths_nist(
     wavelengths: np.ndarray,
     target_names=None,
-    delta_nm: float = 1.0,
+    delta_nm: Union[float, Dict[str, float]] = 1.0,
+    nist_lines: Optional[Dict[str, list]] = None,
 ) -> np.ndarray:
     """Select wavelength indices near NIST atomic emission lines.
 
     Args:
         wavelengths: Array of wavelength values in nm (length = n_wavelengths).
         target_names: Element names to include (e.g. ["Mo", "C"]). None = all.
-        delta_nm: Half-window around each emission line in nm. Default 1.0.
+        delta_nm: Half-window around each emission line in nm.
+            Can be a float (uniform for all elements) or a dict mapping
+            element name → window width (e.g. {"C": 3.0, "Fe": 1.0}).
+            Missing elements in a dict fall back to 1.0 nm. Default 1.0.
+        nist_lines: Optional override for the NIST emission line dict.
+            Defaults to NIST_EMISSION_LINES. Use NIST_EMISSION_LINES_CR_CLEAN
+            for reduced-interference Cr selection (ML-019).
 
     Returns:
         Sorted array of unique channel indices within the emission line windows.
     """
+    if nist_lines is None:
+        nist_lines = NIST_EMISSION_LINES
     if target_names is None:
-        target_names = list(NIST_EMISSION_LINES.keys())
+        target_names = list(nist_lines.keys())
 
     selected = set()
     for name in target_names:
-        for line_nm in NIST_EMISSION_LINES.get(name, []):
-            mask = np.abs(wavelengths - line_nm) <= delta_nm
+        if isinstance(delta_nm, dict):
+            elem_delta = delta_nm.get(name, 1.0)
+        else:
+            elem_delta = delta_nm
+        for line_nm in nist_lines.get(name, []):
+            mask = np.abs(wavelengths - line_nm) <= elem_delta
             selected.update(np.where(mask)[0].tolist())
 
     indices = np.sort(np.array(list(selected), dtype=int))
@@ -301,7 +342,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
                         "wavelengths must be provided to FeatureExtractor for selection_method='nist'"
                     )
                 self._selected_indices = select_wavelengths_nist(
-                    self.wavelengths, delta_nm=1.0
+                    self.wavelengths, delta_nm=NIST_DELTA_NM
                 )
             elif self.selection_method == "sdvs":
                 if y is None:
