@@ -367,3 +367,39 @@
 - High SNR gain is primarily due to high-frequency noise reduction in the 40002-channel spectra
 - compute_snr_gain returns (snr_before_db, snr_after_db, gain_db, peak_loss_pct) as a 4-tuple
 - Per-class benchmarking reveals similar SNR gain across all 12 ore types (consistent across classes)
+
+## OES-014 - Trot/Tvib temperature regression on Mesbah Lab CAP data
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+**T_rot RMSE**: 20.04 K (target: <= 50 K)
+**T_vib RMSE**: 102.00 K (target: <= 200 K)
+**micro_f1**: 0.9939 (guardrail PASS, delta = -0.0011)
+
+### Changes Made:
+- Added run_cap_regress(args) function to main.py: dedicated CAP regression handler
+- Added _is_mesbah_cap(train_path, target) detection function to main.py
+- Added routing in main() dispatch: if regress + CAP path → run_cap_regress()
+- Created scripts/evaluate_cap.py: standalone T_rot/T_vib benchmark script
+
+### ANN Architecture for CAP:
+- MLPRegressor(hidden_layer_sizes=(64,), activation='logistic', solver='lbfgs', alpha=0.01, max_iter=2000)
+- Wrapped in BaggingRegressor(n_estimators=16, bootstrap=True) for variance reduction
+- StandardScaler applied before MLP (ALS/SNV baseline not needed for narrow N2 OES band)
+- Training directly on raw 51-channel spectral features (no NIST wavelength routing)
+
+### Learnings:
+- Single hidden layer (64 units) with logistic activation + lbfgs outperforms multi-layer architectures for small (1258 sample) CAP data
+  - (64,) logistic lbfgs: T_rot=18.9K, T_vib=76.3K — best
+  - (128,64) logistic lbfgs: T_rot=18.4K, T_vib=145K — T_vib degrades with extra layers
+  - (64,32) logistic lbfgs: T_rot=18.8K, T_vib=170K — two layers worse for T_vib
+- CAP data: 1258 samples × 51 N2 2nd-positive OES channels, T_rot ~300-604K (std=51.7K), T_vib ~2595-3958K (std=277K)
+- Complex ALS baseline + SNV normalization is NOT needed for the narrow 51-channel N2 OES data
+  — StandardScaler alone is sufficient, avoiding slow Preprocessor pipeline
+- The existing NIST wavelength routing (for LIBS element ANN) must be bypassed for CAP:
+  — Target names "T_rot"/"T_vib" are not in NIST_EMISSION_LINES, so col_slice=None (use all features)
+  — Alternatively, detect CAP format and skip NIST routing entirely (chosen approach)
+- Detection strategy: check target name in {"T_rot","T_vib","power","flow","substrate_type"} or path contains "mesbah_cap"
+- sklearn MLPRegressor adam solver with relu does NOT converge in 500 iterations on this dataset (ConvergenceWarning)
+  — Use lbfgs solver for small datasets: deterministic, no convergence issues, faster
+- T_vib is harder to predict than T_rot (std ratio 277/51.7=5.4x), but 51-channel OES captures it well
