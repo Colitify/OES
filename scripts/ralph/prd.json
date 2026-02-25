@@ -264,7 +264,7 @@
       "id": "OES-018",
       "title": "CLI polish: unified --task interface, help text, argument validation",
       "priority": 18,
-      "passes": false,
+      "passes": true,
       "notes": "WP6 packaging start. Clean up main.py CLI for all three task modes. Add argument groups. Validate incompatible combinations. micro_f1 must not regress.",
       "acceptanceCriteria": [
         "main.py: argument groups — Data, Preprocessing, Model, Evaluation, Output",
