@@ -461,161 +461,247 @@ def run_cap_regress(args) -> None:
     print("=" * 60)
 
 
+def run_temporal(args) -> None:
+    """Execute BOSCH temporal analysis pipeline (--task temporal)."""
+    from src.data_loader import load_bosch_oes
+    from src.temporal import cluster_discharge_phases, compute_temporal_embedding
+
+    n_comp = getattr(args, "n_temporal_components", 20)
+    n_clusters = getattr(args, "n_clusters", 4)
+    model_type = args.model  # 'lstm' or 'dtw'
+
+    print("=" * 60)
+    print("BOSCH Plasma Etching Temporal Analysis")
+    print(f"  Model: {model_type}  |  n_clusters: {n_clusters}  |  PCA components: {n_comp}")
+    print("=" * 60)
+
+    print(f"\nLoading BOSCH OES data from {args.train}...")
+    data = load_bosch_oes(args.train)
+    spectra = data["spectra"]
+    print(f"  Loaded: {spectra.shape} spectra, {data['day_file']} / {data['wafer_key']}")
+
+    print(f"Computing PCA({n_comp}) temporal embedding...")
+    embedding, pca = compute_temporal_embedding(spectra, n_components=n_comp)
+    print(f"  Embedding: {embedding.shape}")
+
+    if model_type in ("dtw", "all"):
+        print(f"\nDTW K-means clustering (k={n_clusters})...")
+        labels, centroids, inertia = cluster_discharge_phases(
+            embedding, k=n_clusters, metric="euclidean"
+        )
+        print(f"  Inertia: {inertia:.2f}")
+        print(f"  Cluster sizes: {[(labels == c).sum() for c in range(n_clusters)]}")
+
+    if model_type in ("lstm", "all"):
+        import torch
+        from src.temporal import LSTMPredictor, train_lstm
+
+        seq_len = getattr(args, "seq_len", 10)
+        epochs = 50
+        print(f"\nTraining LSTM (seq_len={seq_len}, epochs={epochs})...")
+        model = LSTMPredictor(n_features=n_comp, hidden_size=64, n_layers=2)
+        history = train_lstm(model, embedding, epochs=epochs, lr=1e-3)
+        print(f"  Val MSE: {history['val_loss'][0]:.4f} → {history['val_loss'][-1]:.4f}")
+
+        out_dir = Path(args.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        torch.save({"model_state_dict": model.state_dict(), "n_features": n_comp},
+                   str(out_dir / "lstm_temporal.pt"))
+        print(f"  Saved model to {out_dir}/lstm_temporal.pt")
+
+    print("\n" + "=" * 60)
+    print("Temporal analysis pipeline completed!")
+    print("=" * 60)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="OES/LIBS Spectral Analysis Pipeline")
-    parser.add_argument("--train", type=str, required=True, help="Path to training data")
-    parser.add_argument("--test", type=str, default=None, help="Path to test data")
-    parser.add_argument(
-        "--task",
-        type=str,
-        default="regress",
+    parser = argparse.ArgumentParser(
+        description=(
+            "OES/LIBS Spectral Analysis Pipeline\n\n"
+            "Tasks:\n"
+            "  classify  — 12-class ore-type classification on LIBS Benchmark (*.h5)\n"
+            "  regress   — T_rot/T_vib temperature regression on Mesbah CAP (*.csv)\n"
+            "  temporal  — Temporal clustering/forecasting on BOSCH plasma etching (dir/)\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # ── Data arguments ──────────────────────────────────────────────────────
+    data_grp = parser.add_argument_group("Data arguments")
+    data_grp.add_argument("--train", type=str, required=True,
+                          help="Path to training data: *.h5 (classify), *.csv (regress), "
+                               "or directory (temporal)")
+    data_grp.add_argument("--test", type=str, default=None,
+                          help="Path to test data (same format as --train)")
+    data_grp.add_argument(
+        "--task", type=str, default="regress",
         choices=["classify", "regress", "temporal"],
-        help="Task type: classify (LIBS 12-class), regress (CAP temperatures), temporal (BOSCH time-series)",
+        help="Task mode (default: regress)",
     )
-    parser.add_argument("--n_wavelengths", type=int, default=40002, help="Number of wavelength columns")
-    parser.add_argument("--target_cols", type=str, nargs="+", default=None, help="Target column names")
-    parser.add_argument("--target", type=str, default=None,
-                        help="Target column name for regress task (e.g. T_rot, T_vib, substrate_type)")
-    parser.add_argument("--target_wavelengths", type=str, default=None,
-                        help="Path to CSV file with target wavelength grid (nm). "
-                             "If not specified, uses dataset native grid.")
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="ridge",
-        choices=["pls", "ridge", "lasso", "rf", "svm", "cnn", "xgb", "hybrid", "ann", "ann_hybrid", "all"],
-        help="Model to train (svm/rf for classify; ridge/pls/ann etc. for regress)",
+    data_grp.add_argument("--n_wavelengths", type=int, default=40002,
+                          help="Number of wavelength columns in CSV (default 40002; "
+                               "auto-detected for CAP/BOSCH data)")
+    data_grp.add_argument("--target_cols", type=str, nargs="+", default=None,
+                          help="Target column names (regress, auto-detected if unset)")
+    data_grp.add_argument("--target", type=str, default=None,
+                          help="Single target for regress task "
+                               "(e.g. T_rot, T_vib, substrate_type)")
+    data_grp.add_argument("--target_wavelengths", type=str, default=None,
+                          help="Path to CSV with target wavelength grid (nm). "
+                               "If not specified, uses dataset native grid.")
+
+    # ── Model arguments ─────────────────────────────────────────────────────
+    model_grp = parser.add_argument_group("Model arguments")
+    model_grp.add_argument(
+        "--model", type=str, default="ridge",
+        choices=["pls", "ridge", "lasso", "rf", "svm", "cnn", "xgb",
+                 "hybrid", "ann", "ann_hybrid", "lstm", "dtw", "all"],
+        help="Model to train:\n"
+             "  classify : svm, rf, cnn\n"
+             "  regress  : ridge, pls, lasso, rf, ann, ann_hybrid, xgb, hybrid\n"
+             "  temporal : lstm, dtw\n"
+             "(default: ridge)",
     )
-    parser.add_argument("--optimize", action="store_true", help="Optimize hyperparameters")
-    parser.add_argument("--cv", type=int, default=5, help="Cross-validation folds")
-    parser.add_argument("--output_dir", type=str, default="outputs", help="Output directory")
+    model_grp.add_argument("--optimize", action="store_true",
+                           help="Run Optuna hyperparameter optimisation")
+    model_grp.add_argument("--per_target", action="store_true",
+                           help="Train separate optimised model per target (regress only)")
+    model_grp.add_argument("--n_trials", type=int, default=20,
+                           help="Optuna trials per target (default 20)")
+    model_grp.add_argument("--n_ann_ensemble", type=int, default=16,
+                           help="BaggingRegressor ensemble size for --model ann (default 16)")
+    # Temporal-specific
+    model_grp.add_argument("--n_clusters", type=int, default=4,
+                           help="Number of DTW K-means clusters for --task temporal "
+                                "(default 4)")
+    model_grp.add_argument("--seq_len", type=int, default=10,
+                           help="LSTM sequence length (history window) for --task temporal "
+                                "(default 10)")
+    model_grp.add_argument("--n_temporal_components", type=int, default=20,
+                           help="PCA components for BOSCH temporal embedding (default 20)")
 
-    # Ralph-friendly additions
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser.add_argument("--metrics_out", type=str, default=None, help="Write machine-readable metrics json")
+    # ── Preprocessing arguments ─────────────────────────────────────────────
+    pre_grp = parser.add_argument_group("Preprocessing arguments (regress/classify)")
+    pre_grp.add_argument("--cosmic_ray", action="store_true", default=False,
+                         help="Enable cosmic-ray removal (Z-score spike filter)")
+    pre_grp.add_argument("--cosmic_ray_threshold", type=float, default=5.0,
+                         help="Z-score threshold for cosmic-ray detection (default 5.0)")
+    pre_grp.add_argument("--baseline", type=str, default="als",
+                         choices=["als", "none"],
+                         help="Baseline correction method (default: als)")
+    pre_grp.add_argument("--normalize", type=str, default="snv",
+                         choices=["snv", "minmax", "l2", "none"],
+                         help="Normalisation method (default: snv)")
+    pre_grp.add_argument("--denoise", type=str, default="savgol",
+                         choices=["savgol", "none"],
+                         help="Denoising method (default: savgol)")
+    pre_grp.add_argument("--baseline_lam", type=float, default=1e6,
+                         help="ALS baseline smoothness λ (default 1e6)")
+    pre_grp.add_argument("--baseline_p", type=float, default=0.01,
+                         help="ALS baseline asymmetry p (default 0.01)")
+    pre_grp.add_argument("--savgol_window", type=int, default=11,
+                         help="Savitzky-Golay window length (default 11)")
+    pre_grp.add_argument("--savgol_polyorder", type=int, default=3,
+                         help="Savitzky-Golay polynomial order (default 3)")
+    pre_grp.add_argument("--internal_standard", action="store_true",
+                         help="Divide each spectrum by Fe 259.94 nm reference line intensity")
+    pre_grp.add_argument("--internal_standard_wl", type=float, default=259.94,
+                         help="Internal standard wavelength (nm) (default 259.94)")
 
-    # Preprocessing parameters
-    parser.add_argument("--cosmic_ray", action="store_true", default=False,
-                        help="Enable cosmic ray removal (Z-score spike filter, first preprocessing step)")
-    parser.add_argument("--cosmic_ray_threshold", type=float, default=5.0,
-                        help="Z-score threshold for cosmic ray detection (default 5.0)")
-    parser.add_argument(
-        "--baseline", type=str, default="als", choices=["als", "none"],
-        help="Baseline correction method"
-    )
-    parser.add_argument(
-        "--normalize", type=str, default="snv", choices=["snv", "minmax", "l2", "none"],
-        help="Normalization method"
-    )
-    parser.add_argument(
-        "--denoise", type=str, default="savgol", choices=["savgol", "none"],
-        help="Denoising method"
-    )
-    parser.add_argument("--baseline_lam", type=float, default=1e6, help="ALS baseline smoothness parameter")
-    parser.add_argument("--baseline_p", type=float, default=0.01, help="ALS baseline asymmetry parameter")
-    parser.add_argument("--savgol_window", type=int, default=11, help="Savitzky-Golay window length")
-    parser.add_argument("--savgol_polyorder", type=int, default=3, help="Savitzky-Golay polynomial order")
+    # ── Feature extraction arguments ─────────────────────────────────────────
+    feat_grp = parser.add_argument_group(
+        "Feature extraction arguments (regress only)")
+    feat_grp.add_argument("--n_components", type=int, default=50,
+                          help="PCA components for feature extraction (default 50)")
+    feat_grp.add_argument("--n_components_min", type=int, default=10,
+                          help="Min n_components for optimisation search")
+    feat_grp.add_argument("--n_components_max", type=int, default=100,
+                          help="Max n_components for optimisation search")
+    feat_grp.add_argument("--optimize_n_components", action="store_true",
+                          help="Include n_components in hyperparameter optimisation")
+    feat_grp.add_argument("--feature_method", type=str, default="pca",
+                          choices=["pca", "wavelength_selection"],
+                          help="Feature extraction method (default: pca)")
+    feat_grp.add_argument("--selection_method", type=str, default="correlation",
+                          choices=["correlation", "variance", "f_score", "sdvs", "nist"],
+                          help="Wavelength selection method (when --feature_method=wavelength_selection)")
+    feat_grp.add_argument("--n_selected_wavelengths", type=int, default=500,
+                          help="Wavelengths to select (default 500)")
+    feat_grp.add_argument("--n_selected_min", type=int, default=100,
+                          help="Min selected wavelengths for optimisation")
+    feat_grp.add_argument("--n_selected_max", type=int, default=1000,
+                          help="Max selected wavelengths for optimisation")
+    feat_grp.add_argument("--optimize_features", action="store_true",
+                          help="Include feature method in optimisation")
+    feat_grp.add_argument("--optimize_preprocess", action="store_true",
+                          help="Include preprocessing params in optimisation")
+    feat_grp.add_argument("--two_stage", action="store_true",
+                          help="Two-stage optimisation: Stage1=preprocessing+PCA, Stage2=model")
+    feat_grp.add_argument("--subsample_ratio", type=float, default=0.3,
+                          help="Subsample ratio for preprocessing optimisation (default 0.3)")
+    feat_grp.add_argument("--cr_clean_lines", action="store_true",
+                          help="Use reduced Cr NIST line set for ann/ann_hybrid (ML-019)")
+    feat_grp.add_argument("--cr_model", type=str, default="ridge",
+                          choices=["ridge", "pls"],
+                          help="Cr model in ann_hybrid: ridge (default) or pls (ML-020)")
 
-    # Feature extraction parameters
-    parser.add_argument("--n_components", type=int, default=50, help="Number of PCA components for feature extraction")
-    parser.add_argument("--n_components_min", type=int, default=10, help="Min n_components for optimization search")
-    parser.add_argument("--n_components_max", type=int, default=100, help="Max n_components for optimization search")
-    parser.add_argument("--optimize_n_components", action="store_true", help="Include n_components in hyperparameter optimization")
+    # ── Evaluation arguments ─────────────────────────────────────────────────
+    eval_grp = parser.add_argument_group("Evaluation arguments")
+    eval_grp.add_argument("--cv", type=int, default=5,
+                          help="Cross-validation folds (default 5)")
+    eval_grp.add_argument("--seed", type=int, default=42,
+                          help="Random seed (default 42)")
+    eval_grp.add_argument("--n_per_target", type=int, default=0,
+                          help="GroupKFold aggregation: spectra per target sample "
+                               "(set to 50 for LIBS; 0 = disabled)")
+    eval_grp.add_argument("--mc_dropout", action="store_true",
+                          help="MC-Dropout uncertainty + temperature-scaling calibration "
+                               "(--task classify --model cnn only)")
+    eval_grp.add_argument("--n_mc_samples", type=int, default=50,
+                          help="MC-Dropout forward passes (default 50)")
+    eval_grp.add_argument("--explain", action="store_true",
+                          help="SHAP attribution overlay on CNN classifier "
+                               "(--task classify --model cnn only)")
+    eval_grp.add_argument("--explain_samples", type=int, default=50,
+                          help="SHAP explain samples (default 50)")
 
-    # Feature selection parameters (ML-004)
-    parser.add_argument(
-        "--feature_method", type=str, default="pca",
-        choices=["pca", "wavelength_selection"],
-        help="Feature extraction method (pca or wavelength_selection)"
-    )
-    parser.add_argument(
-        "--selection_method", type=str, default="correlation",
-        choices=["correlation", "variance", "f_score", "sdvs", "nist"],
-        help="Wavelength selection method (used when --feature_method=wavelength_selection)"
-    )
-    parser.add_argument("--n_selected_wavelengths", type=int, default=500, help="Number of wavelengths to select (used when --feature_method=wavelength_selection)")
-    parser.add_argument("--n_selected_min", type=int, default=100, help="Min n_selected_wavelengths for optimization search")
-    parser.add_argument("--n_selected_max", type=int, default=1000, help="Max n_selected_wavelengths for optimization search")
-    parser.add_argument("--optimize_features", action="store_true", help="Include feature method (PCA vs wavelength selection) in optimization")
-    parser.add_argument("--optimize_preprocess", action="store_true", help="Include preprocessing params in optimization (baseline_lam, baseline_p, savgol_window, savgol_polyorder)")
-    parser.add_argument("--two_stage", action="store_true", help="Two-stage optimization: Stage1=preprocessing+PCA, Stage2=model params (recommended)")
-    parser.add_argument("--n_trials", type=int, default=20, help="Number of Optuna trials for optimization (default 20)")
-    parser.add_argument("--subsample_ratio", type=float, default=0.3, help="Subsample ratio for preprocessing optimization (0.0-1.0). Lower=faster. Default 0.3")
+    # ── Ensemble arguments ────────────────────────────────────────────────────
+    ens_grp = parser.add_argument_group("Ensemble arguments (regress only)")
+    ens_grp.add_argument("--ensemble", action="store_true",
+                         help="Ensemble model: PLS + Ridge + RF")
+    ens_grp.add_argument("--ensemble_method", type=str, default="stacking",
+                         choices=["stacking", "voting"],
+                         help="Ensemble method (default: stacking)")
+    ens_grp.add_argument("--ensemble_models", type=str, nargs="+",
+                         default=["pls", "ridge", "rf"],
+                         help="Base models for ensemble (default: pls ridge rf)")
+    ens_grp.add_argument("--logit_transform", action="store_true",
+                         help="Logit-transform low-concentration targets before fitting")
+    ens_grp.add_argument("--logit_elements", type=str, nargs="+",
+                         default=["C", "Si", "Mo", "Cu"],
+                         help="Elements to logit-transform (default: C Si Mo Cu)")
+    ens_grp.add_argument("--cnn_weighted_loss", action="store_true",
+                         help="Per-element weighted MSE in CNN Phase 1 training")
+    ens_grp.add_argument("--cnn_augment", action="store_true",
+                         help="Spectral augmentation during CNN Phase 2 training")
+    ens_grp.add_argument("--normalize_sum100", action="store_true",
+                         help="Post-hoc closure constraint: rescale Σ(wt%%)=100")
 
-    # Ensemble parameters (ML-005)
-    parser.add_argument("--ensemble", action="store_true", help="Use ensemble model combining PLS + Ridge + RF")
-    parser.add_argument(
-        "--ensemble_method", type=str, default="stacking",
-        choices=["stacking", "voting"],
-        help="Ensemble method: stacking (meta-learner) or voting (average)"
-    )
-    parser.add_argument(
-        "--ensemble_models", type=str, nargs="+", default=["pls", "ridge", "rf"],
-        help="Base models for ensemble (default: pls ridge rf)"
-    )
-
-    # Per-target optimization (ML-006)
-    parser.add_argument("--per_target", action="store_true", help="Train separate optimized model per target element")
-
-    # Logit target transform (ML-008)
-    parser.add_argument("--logit_transform", action="store_true", help="Apply logit transform to low-concentration targets before fitting")
-    parser.add_argument("--logit_elements", type=str, nargs="+", default=["C", "Si", "Mo", "Cu"],
-                        help="Elements to apply logit transform to (default: C Si Mo Cu)")
-
-    # CNN weighted loss + augmentation (ML-009)
-    parser.add_argument("--cnn_weighted_loss", action="store_true",
-                        help="Enable per-element weighted MSE in Phase 1 CNN training (C:2.0, Mo:2.0, Cu:1.5, Si:1.5)")
-    parser.add_argument("--cnn_augment", action="store_true",
-                        help="Enable spectral data augmentation during CNN Phase 2 training")
-
-    # SDVS feature selection (ML-010): extend existing --selection_method choices
-    # (sdvs is already registered in FeatureExtractor; expose it here)
-
-    # Per-target aggregation evaluation (ML-013)
-    parser.add_argument("--n_per_target", type=int, default=0,
-        help="If >0, use GroupKFold + per-target aggregation in evaluation "
-             "(set to 50 for this dataset: 50 spectra per target)")
-
-    # ANN ensemble (ML-014)
-    parser.add_argument("--n_ann_ensemble", type=int, default=16,
-        help="Number of ANN models in ensemble for --model ann (default 16, like FORTH)")
-
-    # Internal standard normalization (ML-018)
-    parser.add_argument("--internal_standard", action="store_true",
-        help="Divide each spectrum by the Fe 259.94 nm reference line intensity after "
-             "baseline correction + smoothing (physical shot-to-shot correction)")
-    parser.add_argument("--internal_standard_wl", type=float, default=259.94,
-        help="Wavelength (nm) of the internal standard reference line (default: Fe 259.94 nm)")
-
-    # Cr clean line selection (ML-019)
-    parser.add_argument("--cr_clean_lines", action="store_true",
-        help="Use reduced Cr NIST line set (267.716, 357.869, 425.433 nm only) "
-             "to reduce Fe-matrix interference on Cr channels")
-
-    # Cr model routing in ann_hybrid (ML-020)
-    parser.add_argument("--cr_model", type=str, default="ridge",
-        choices=["ridge", "pls"],
-        help="Model for Cr in ann_hybrid: 'ridge' (PCA features) or "
-             "'pls' (PLS on Cr NIST channels). Default: ridge (ML-016 baseline)")
-
-    # Closure constraint post-processing (ML-022)
-    parser.add_argument("--normalize_sum100", action="store_true",
-        help="After prediction, rescale element concentrations so Σ(wt%%)=100 "
-             "(closure constraint; Noll et al. 2014)")
-
-    # MC-Dropout uncertainty + calibration (OES-012)
-    parser.add_argument("--mc_dropout", action="store_true",
-        help="Enable MC-Dropout uncertainty quantification and temperature scaling calibration (CNN only)")
-    parser.add_argument("--n_mc_samples", type=int, default=50,
-        help="Number of MC-Dropout forward passes for uncertainty estimation (default 50)")
-
-    # SHAP interpretability (OES-013)
-    parser.add_argument("--explain", action="store_true",
-        help="Compute SHAP attribution overlays on CNN classifier and save figure (CNN only)")
-    parser.add_argument("--explain_samples", type=int, default=50,
-        help="Number of samples to explain with SHAP (default 50)")
+    # ── Output arguments ──────────────────────────────────────────────────────
+    out_grp = parser.add_argument_group("Output arguments")
+    out_grp.add_argument("--output_dir", type=str, default="outputs",
+                         help="Output directory for models, figures, predictions "
+                              "(default: outputs)")
+    out_grp.add_argument("--metrics_out", type=str, default=None,
+                         help="Write machine-readable metrics JSON to this path")
 
     args = parser.parse_args()
+
+    # ── Cross-task argument validation ────────────────────────────────────────
+    if args.task == "temporal" and args.model not in ("lstm", "dtw", "all"):
+        parser.error(
+            f"--task temporal requires --model in {{lstm, dtw}}, got '{args.model}'"
+        )
 
     # Fix randomness for reproducibility
     random.seed(args.seed)
@@ -624,6 +710,10 @@ def main():
     # Route to task-specific handler
     if args.task == "classify":
         run_classify(args)
+        return
+
+    if args.task == "temporal":
+        run_temporal(args)
         return
 
     if args.task == "regress" and _is_mesbah_cap(args.train, args.target):
