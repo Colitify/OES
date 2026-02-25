@@ -347,6 +347,120 @@ def run_classify(args) -> None:
     print("=" * 60)
 
 
+def _is_mesbah_cap(train_path: str, target: str | None) -> bool:
+    """Detect Mesbah Lab CAP dataset by path name or target column."""
+    _CAP_TARGETS = {"T_rot", "T_vib", "power", "flow", "substrate_type"}
+    if target in _CAP_TARGETS:
+        return True
+    p = Path(train_path)
+    return "mesbah_cap" in str(p) or p.name in ("dat_train.csv", "dat_test.csv")
+
+
+def run_cap_regress(args) -> None:
+    """Execute Mesbah Lab CAP temperature regression pipeline (--task regress with CAP data).
+
+    Uses ANN (MLPRegressor in BaggingRegressor) on the raw 51-channel OES features.
+    No NIST wavelength routing — the N2 2nd-positive channels are used directly.
+    """
+    import warnings
+    warnings.filterwarnings("ignore")
+
+    from sklearn.ensemble import BaggingRegressor
+    from sklearn.model_selection import cross_val_score
+    from sklearn.neural_network import MLPRegressor
+    from sklearn.preprocessing import StandardScaler
+
+    from src.data_loader import load_mesbah_cap
+
+    _CAP_TARGETS = ("T_rot", "T_vib", "power", "flow", "substrate_type")
+    _TARGETS_THRESHOLDS = {"T_rot": 50.0, "T_vib": 200.0}
+
+    # Determine which targets to fit
+    if args.target:
+        targets = [args.target]
+    elif args.per_target:
+        targets = ["T_rot", "T_vib"]
+    else:
+        targets = ["T_rot", "T_vib"]
+
+    print("=" * 60)
+    print("Mesbah Lab CAP Temperature Regression (ANN per-target)")
+    print("=" * 60)
+
+    n_ens = getattr(args, "n_ann_ensemble", 16)
+    cv_folds = getattr(args, "cv", 5)
+
+    results = {}
+    for target in targets:
+        if target not in _CAP_TARGETS:
+            print(f"  [SKIP] Unknown CAP target: {target}")
+            continue
+        print(f"\n--- Target: {target} ---")
+        X, y, wavelengths = load_mesbah_cap(args.train, target=target)
+        print(f"  X={X.shape}, y: mean={y.mean():.1f}, std={y.std():.1f}")
+
+        # StandardScaler (ALS + SNV not needed for narrow-band N2 OES channels)
+        scaler = StandardScaler()
+        X_sc = scaler.fit_transform(X)
+
+        # ANN: single hidden layer (64) proved best on 51-channel CAP data
+        base_ann = MLPRegressor(
+            hidden_layer_sizes=(64,),
+            activation="logistic",
+            solver="lbfgs",
+            alpha=0.01,
+            max_iter=2000,
+            random_state=args.seed,
+        )
+        model = BaggingRegressor(
+            estimator=base_ann,
+            n_estimators=n_ens,
+            bootstrap=True,
+            n_jobs=-1,
+            random_state=args.seed,
+        )
+
+        scores = cross_val_score(
+            model, X_sc, y, cv=cv_folds,
+            scoring="neg_root_mean_squared_error", n_jobs=1
+        )
+        rmse = float(-scores.mean())
+        rmse_std = float(scores.std())
+        print(f"  {cv_folds}-fold CV RMSE: {rmse:.2f} ± {rmse_std:.2f} K")
+
+        threshold = _TARGETS_THRESHOLDS.get(target)
+        if threshold is not None:
+            status = "PASS" if rmse <= threshold else "FAIL"
+            print(f"  Guardrail ({target} RMSE <= {threshold} K): {status}")
+
+        results[target] = {"rmse": rmse, "rmse_std": rmse_std}
+
+    # Summary
+    print("\n" + "-" * 40)
+    for tgt, res in results.items():
+        threshold = _TARGETS_THRESHOLDS.get(tgt, None)
+        thr_str = f" / target <= {threshold} K" if threshold else ""
+        print(f"  {tgt}: RMSE = {res['rmse']:.2f} K{thr_str}")
+
+    # Write metrics_cap.json
+    if args.metrics_out:
+        rmse_values = [v["rmse"] for v in results.values()]
+        rmse_mean = sum(rmse_values) / len(rmse_values)
+        payload = {
+            "primary_metric": {"name": "RMSE_mean", "value": round(rmse_mean, 4)},
+            "per_target_rmse": {k: round(v["rmse"], 4) for k, v in results.items()},
+            "per_target_rmse_std": {k: round(v["rmse_std"], 4) for k, v in results.items()},
+        }
+        out_path = Path(args.metrics_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\n  Wrote metrics to {out_path}")
+
+    print("\n" + "=" * 60)
+    print("CAP regression pipeline completed!")
+    print("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="OES/LIBS Spectral Analysis Pipeline")
     parser.add_argument("--train", type=str, required=True, help="Path to training data")
@@ -510,6 +624,10 @@ def main():
     # Route to task-specific handler
     if args.task == "classify":
         run_classify(args)
+        return
+
+    if args.task == "regress" and _is_mesbah_cap(args.train, args.target):
+        run_cap_regress(args)
         return
 
     # Create output directories

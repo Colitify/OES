@@ -9,7 +9,7 @@
       "id": "OES-001",
       "title": "Download LIBS Benchmark dataset and build HDF5 data loader",
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Source: https://springernature.figshare.com/collections/Benchmark_classification_dataset_for_laser-induced_breakdown_spectroscopy/4768790 — CC-BY-4.0. Files: train.h5 (500 spectra × 12 classes = 6000 total, 40002 channels, 200-1000 nm) + test.h5 + test_labels.csv. Download to data/libs_benchmark/. No metrics.json written (guardrail skipped).",
       "acceptanceCriteria": [
         "data/libs_benchmark/train.h5 and test.h5 downloaded (or fetch script created if direct download needed)",
@@ -23,7 +23,7 @@
       "id": "OES-002",
       "title": "Download Mesbah Lab CAP dataset and extend data loader",
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Source: https://github.com/Mesbah-Lab-UCB/Machine-Learning-for-Plasma-Diagnostics — clone or download CSV files. dat_train.csv / dat_test.csv contain N2 2nd-positive OES columns + T_rot, T_vib (float, Kelvin) + operating condition columns (power, flow, substrate_type). No metrics.json written.",
       "acceptanceCriteria": [
         "data/mesbah_cap/dat_train.csv and dat_test.csv present",
@@ -37,7 +37,7 @@
       "id": "OES-003",
       "title": "Add --task classify/regress/temporal CLI mode + update guardrail for micro_f1",
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "This is the infrastructure pivot story. After this story, the guardrail can track micro_f1 (maximize). Update guardrail.py to support both minimize (RMSE_mean) and maximize (micro_f1) modes based on primary_metric.name. Add --task flag to main.py. Reset results/best.json by deleting it.",
       "acceptanceCriteria": [
         "main.py --task argument added with choices=['classify','regress','temporal'], default='regress'",
@@ -51,7 +51,7 @@
       "id": "OES-004",
       "title": "Cosmic ray removal in Preprocessor (Z-score spike filter)",
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Cosmic rays appear as single-channel spikes >> 5 sigma above local median. Implement median-filter-based removal. CLI flag --cosmic_ray (default: True for classify task). No metrics.json written; this is a preprocessing enhancement.",
       "acceptanceCriteria": [
         "src/preprocessing.py: Preprocessor gains cosmic_ray_removal(X, threshold=5.0) static method",
@@ -67,7 +67,7 @@
       "id": "OES-005",
       "title": "Wavelength grid alignment via interpolation (multi-instrument support)",
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "LIBS Benchmark (40002 channels, 200-1000 nm) and Mesbah Lab (variable channels) need a common wavelength grid. Implement scipy.interpolate.interp1d-based alignment. Wavelength axis stored as metadata in data loader.",
       "acceptanceCriteria": [
         "src/data_loader.py: all load_* functions return (X, y, wavelengths_nm) where wavelengths_nm is a 1D float array of nm values",
@@ -81,7 +81,7 @@
       "id": "OES-006",
       "title": "SNR benchmark report for preprocessing pipeline (PRE-02: ≥6 dB)",
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "PRE-02 requires denoising achieves ≥6 dB SNR gain without >5% peak loss. Implement SNR measurement as signal^2/noise^2 ratio (dB) before/after SavGol denoising. Write a benchmark report script.",
       "acceptanceCriteria": [
         "src/evaluation.py: compute_snr_gain(X_raw, X_denoised) function returns (snr_before_db, snr_after_db, gain_db, peak_loss_pct)",
@@ -96,7 +96,7 @@
       "id": "OES-007",
       "title": "CWT-based peak detection module (MOD-01)",
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Use scipy.signal.find_peaks with prominence filtering as CWT alternative (find_peaks_cwt deprecated in scipy 1.12). Detect emission peaks per spectrum, return wavelength positions, intensities, FWHM. Needed for WP3 feature extraction.",
       "acceptanceCriteria": [
         "src/features.py: detect_peaks(spectrum, wavelengths, min_prominence=0.02, min_width_nm=0.1) returns DataFrame with columns [wavelength_nm, intensity, prominence, fwhm_nm]",
@@ -111,7 +111,7 @@
       "id": "OES-008",
       "title": "Plasma emission line dictionary (N/O/H/Ar/N2 molecular bands) from NIST ASD",
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Build PLASMA_EMISSION_LINES dict covering key species in high-voltage discharge OES. Lines sourced from NIST ASD (physics.nist.gov/ASD). Extend existing NIST_EMISSION_LINES pattern in src/features.py. Critical for interpretable feature extraction.",
       "acceptanceCriteria": [
         "src/features.py: PLASMA_EMISSION_LINES dict defined with keys: 'N2_2pos' (N2 2nd positive: 315.9,337.1,357.7,380.5 nm), 'N2p_1neg' (N2+ 1st negative: 391.4,427.8 nm), 'N_I' (atomic N: 746.8,818.5,862.9 nm), 'H_alpha' (656.3 nm), 'H_beta' (486.1 nm), 'O_I' (777.4,844.6,926.6 nm), 'Ar_I' (696.5,706.7,738.4,750.4,763.5,772.4 nm)",
@@ -125,7 +125,7 @@
       "id": "OES-009",
       "title": "Full descriptor feature vector assembly (peaks + NIST windows + statistics)",
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "WP3 culmination: assemble three feature blocks into one descriptor vector per spectrum. Block A: NIST-window intensities (plasma lines). Block B: peak summary statistics (top-K peaks by prominence). Block C: global statistics (mean, std, skewness, kurtosis, band ratios). Used as input for traditional ML models.",
       "acceptanceCriteria": [
         "src/features.py: PlasmaDescriptorExtractor class with fit(X, wavelengths) / transform(X, wavelengths) → ndarray of shape (n_samples, n_features)",
@@ -141,7 +141,7 @@
       "id": "OES-010",
       "title": "SVM + Random Forest baseline classifiers on LIBS Benchmark (establish micro_f1 baseline)",
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "First story that writes metrics.json and triggers micro_f1 guardrail. Use PCA(50)+SVM(RBF) and PCA(50)+RF(100 trees) on LIBS Benchmark 12-class problem. 5-fold stratified CV. Target: establish baseline micro_f1 >= 0.70 (guardrail initializes best.json). Main metric is micro_f1.",
       "acceptanceCriteria": [
         "main.py --task classify --model svm runs SVM(kernel='rbf', C=10, gamma='scale') on PCA(50) features",
@@ -156,7 +156,7 @@
       "id": "OES-011",
       "title": "Adapt 1D-CNN for classification (softmax output) — micro_f1 target ≥ 0.85",
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Adapt existing Conv1DRegressor in src/models/deep_learning.py to classification. Add Conv1DClassifier with softmax output and CrossEntropyLoss. Should improve over SVM baseline. Optuna tunes n_filters, kernel_size, dropout, lr.",
       "acceptanceCriteria": [
         "src/models/deep_learning.py: Conv1DClassifier(n_classes, n_filters, kernel_size, dropout, lr) class",
@@ -171,7 +171,7 @@
       "id": "OES-012",
       "title": "MC-Dropout uncertainty quantification + temperature scaling calibration (MOD-02)",
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "MOD-02 requires uncertainty via MC-dropout and ECE <= 0.05 via temperature scaling. Implement both for Conv1DClassifier. micro_f1 should not regress from OES-011 baseline.",
       "acceptanceCriteria": [
         "src/models/deep_learning.py: predict_with_uncertainty(model, X, n_samples=50) — keeps dropout active during inference, returns (mean_probs, std_probs) of shape (N, n_classes)",
@@ -187,7 +187,7 @@
       "id": "OES-013",
       "title": "SHAP interpretability overlays on 1D-CNN classifier",
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "MOD-01 and objective 2.6: feature-decision visualizations. Use shap.GradientExplainer on Conv1DClassifier. Overlay SHAP values on wavelength axis and compare with PLASMA_EMISSION_LINES positions. micro_f1 should not regress.",
       "acceptanceCriteria": [
         "requirements.txt: shap>=0.44 added",
@@ -203,7 +203,7 @@
       "id": "OES-014",
       "title": "Trot/Tvib temperature regression on Mesbah Lab CAP data",
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Semi-quantitative analysis (objective 2.5): predict rotational/vibrational temperature from N2 2nd-positive OES. Use existing ANN regression pipeline (ann model). Target: RMSE_Trot <= 50 K. This story writes metrics.json with micro_f1 unchanged (uses classify task path), adds cap_rmse_trot to metrics.",
       "acceptanceCriteria": [
         "main.py --task regress --train data/mesbah_cap/dat_train.csv --target T_rot --model ann --per_target --cv 5 --metrics_out results/metrics_cap.json runs without error",
