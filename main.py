@@ -161,6 +161,10 @@ def main():
     parser.add_argument("--metrics_out", type=str, default=None, help="Write machine-readable metrics json")
 
     # Preprocessing parameters
+    parser.add_argument("--cosmic_ray", action="store_true", default=False,
+                        help="Enable cosmic ray removal (Z-score spike filter, first preprocessing step)")
+    parser.add_argument("--cosmic_ray_threshold", type=float, default=5.0,
+                        help="Z-score threshold for cosmic ray detection (default 5.0)")
     parser.add_argument(
         "--baseline", type=str, default="als", choices=["als", "none"],
         help="Baseline correction method"
@@ -314,6 +318,8 @@ def main():
         baseline_p=args.baseline_p,
         savgol_window=args.savgol_window,
         savgol_polyorder=args.savgol_polyorder,
+        cosmic_ray=args.cosmic_ray,
+        cosmic_ray_threshold=args.cosmic_ray_threshold,
         internal_standard=args.internal_standard,
         internal_standard_wl=args.internal_standard_wl,
         wavelengths=train_data.wavelengths,
