@@ -446,3 +446,48 @@ def compute_snr_gain(
     peak_loss_pct = float(lost_peaks / total_raw_peaks) if total_raw_peaks > 0 else 0.0
 
     return snr_before_db, snr_after_db, gain_db, peak_loss_pct
+
+
+def evaluate_classifier(
+    model: Any,
+    X: np.ndarray,
+    y: np.ndarray,
+    cv: int = 5,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """Evaluate a classifier via stratified k-fold cross-validation.
+
+    Args:
+        model: Sklearn-compatible classifier (must implement fit/predict).
+        X: Feature matrix (n_samples, n_features).
+        y: Class label array (n_samples,).
+        cv: Number of stratified CV folds (default 5).
+        seed: Random seed for StratifiedKFold shuffling.
+
+    Returns:
+        Dict with keys: micro_f1, macro_f1, accuracy, confusion_matrix,
+        per_class_f1 (dict mapping class label → f1 score).
+    """
+    from sklearn.metrics import f1_score, accuracy_score, confusion_matrix as cm_fn
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+
+    kf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=seed)
+    y_pred = cross_val_predict(model, X, y, cv=kf, n_jobs=1)
+
+    micro_f1 = float(f1_score(y, y_pred, average="micro"))
+    macro_f1 = float(f1_score(y, y_pred, average="macro"))
+    accuracy = float(accuracy_score(y, y_pred))
+    conf_mat = cm_fn(y, y_pred).tolist()
+    classes = sorted(set(y.tolist()))
+    per_class_f1 = {
+        str(int(c)): float(f1_score(y, y_pred, labels=[c], average="micro"))
+        for c in classes
+    }
+
+    return {
+        "micro_f1": micro_f1,
+        "macro_f1": macro_f1,
+        "accuracy": accuracy,
+        "confusion_matrix": conf_mat,
+        "per_class_f1": per_class_f1,
+    }
