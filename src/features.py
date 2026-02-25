@@ -464,6 +464,118 @@ def select_wavelengths_nist(
     return indices
 
 
+class PlasmaDescriptorExtractor(BaseEstimator, TransformerMixin):
+    """Assemble a fixed-width descriptor vector from plasma OES spectra.
+
+    Three feature blocks:
+    - Block A: Mean intensity in each PLASMA_EMISSION_LINES window.
+      One value per emission LINE (not per species); total = 20 features.
+    - Block B: Top-K peaks by prominence, each described by
+      [wavelength_nm, intensity, fwhm_nm]; zero-padded to K×3 = 60 features.
+    - Block C: Global statistics [mean, std, skew, kurtosis, max_intensity,
+      argmax_wl, N2_Hα_ratio, N2_OI_ratio] = 8 features.
+
+    Total descriptor length = 20 + 60 + 8 = 88 features (default K=20).
+    """
+
+    def __init__(
+        self,
+        top_k_peaks: int = 20,
+        min_prominence: float = 0.02,
+        min_width_nm: float = 0.1,
+    ):
+        self.top_k_peaks = top_k_peaks
+        self.min_prominence = min_prominence
+        self.min_width_nm = min_width_nm
+        self._wavelengths: Optional[np.ndarray] = None
+        self._block_a_masks: Optional[List[np.ndarray]] = None
+
+    def _build_block_a_masks(self, wavelengths: np.ndarray) -> List[np.ndarray]:
+        masks = []
+        for sp, lines in PLASMA_EMISSION_LINES.items():
+            delta = PLASMA_DELTA_NM.get(sp, 1.0)
+            for line_nm in lines:
+                masks.append(np.abs(wavelengths - line_nm) <= delta)
+        return masks
+
+    def fit(self, X: np.ndarray, wavelengths: Optional[np.ndarray] = None):
+        if wavelengths is not None:
+            self._wavelengths = wavelengths
+            self._block_a_masks = self._build_block_a_masks(wavelengths)
+        return self
+
+    def transform(self, X: np.ndarray, wavelengths: Optional[np.ndarray] = None) -> np.ndarray:
+        wl = wavelengths if wavelengths is not None else self._wavelengths
+        if wl is None:
+            raise ValueError("wavelengths must be provided to PlasmaDescriptorExtractor")
+
+        if wavelengths is not None:
+            block_a_masks = self._build_block_a_masks(wl)
+        elif self._block_a_masks is not None:
+            block_a_masks = self._block_a_masks
+        else:
+            block_a_masks = self._build_block_a_masks(wl)
+
+        n_samples = X.shape[0]
+        top_k = self.top_k_peaks
+        n_block_a = len(block_a_masks)   # 20
+        n_block_b = top_k * 3            # 60
+        n_block_c = 8
+        n_total = n_block_a + n_block_b + n_block_c
+
+        n2_mask = select_wavelengths_plasma(wl, species=["N2_2pos"])
+        halpha_mask = select_wavelengths_plasma(wl, species=["H_alpha"])
+        oi_mask = select_wavelengths_plasma(wl, species=["O_I"])
+
+        descriptor = np.zeros((n_samples, n_total), dtype=np.float32)
+        for i in range(n_samples):
+            spec = X[i].astype(np.float64)
+
+            # Block A: mean intensity per emission line window
+            for j, mask in enumerate(block_a_masks):
+                if mask.any():
+                    descriptor[i, j] = float(spec[mask].mean())
+
+            # Block B: top-K peaks [wavelength_nm, intensity, fwhm_nm], zero-padded
+            peaks_df = detect_peaks(
+                spec, wl,
+                min_prominence=self.min_prominence,
+                min_width_nm=self.min_width_nm,
+            )
+            n_detected = min(len(peaks_df), top_k)
+            if n_detected > 0:
+                for k in range(n_detected):
+                    row = peaks_df.iloc[k]
+                    base = n_block_a + k * 3
+                    descriptor[i, base] = float(row["wavelength_nm"])
+                    descriptor[i, base + 1] = float(row["intensity"])
+                    descriptor[i, base + 2] = float(row["fwhm_nm"])
+
+            # Block C: global statistics
+            mu = spec.mean()
+            sigma = spec.std()
+            eps = 1e-10
+            normed = (spec - mu) / (sigma + eps)
+            skew = float(np.mean(normed ** 3))
+            kurt = float(np.mean(normed ** 4) - 3)
+            max_int = float(spec.max())
+            argmax_wl = float(wl[int(np.argmax(spec))])
+            n2_mean = float(spec[n2_mask].mean()) if n2_mask.any() else 0.0
+            halpha_mean = float(spec[halpha_mask].mean()) if halpha_mask.any() else eps
+            oi_mean = float(spec[oi_mask].mean()) if oi_mask.any() else eps
+            n2_halpha = n2_mean / (abs(halpha_mean) + eps)
+            n2_oi = n2_mean / (abs(oi_mean) + eps)
+            descriptor[i, n_block_a + n_block_b:] = np.array(
+                [mu, sigma, skew, kurt, max_int, argmax_wl, n2_halpha, n2_oi],
+                dtype=np.float32,
+            )
+
+        return descriptor
+
+    def fit_transform(self, X: np.ndarray, wavelengths: Optional[np.ndarray] = None) -> np.ndarray:
+        return self.fit(X, wavelengths).transform(X, wavelengths)
+
+
 class FeatureExtractor(BaseEstimator, TransformerMixin):
     """Feature extraction and dimensionality reduction for spectral data."""
 
@@ -471,7 +583,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self,
         method: Literal["pca", "pls", "wavelength_selection", "none"] = "pca",
         n_components: int = 50,
-        selection_method: Literal["correlation", "variance", "f_score", "sdvs", "nist"] = "correlation",
+        selection_method: Literal["correlation", "variance", "f_score", "sdvs", "nist", "plasma_descriptor"] = "correlation",
         wavelengths: Optional[np.ndarray] = None,
     ):
         """Initialize feature extractor.
@@ -487,6 +599,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self.wavelengths = wavelengths
         self._model = None
         self._selected_indices = None
+        self._pde: Optional[PlasmaDescriptorExtractor] = None
 
     def fit(self, X: np.ndarray, y: Optional[np.ndarray] = None):
         """Fit the feature extractor.
@@ -520,6 +633,9 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
                 self._selected_indices = select_wavelengths_sdvs(
                     X, y, n_per_element=self.n_components
                 )
+            elif self.selection_method == "plasma_descriptor":
+                self._pde = PlasmaDescriptorExtractor()
+                self._pde.fit(X, self.wavelengths)
             else:
                 if y is None:
                     raise ValueError("y is required for wavelength selection")
@@ -545,6 +661,8 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             return self._model.transform(X)
 
         elif self.method == "wavelength_selection":
+            if self.selection_method == "plasma_descriptor" and self._pde is not None:
+                return self._pde.transform(X, self.wavelengths)
             return X[:, self._selected_indices]
 
         raise ValueError(f"Unknown method: {self.method}")
