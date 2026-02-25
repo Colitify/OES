@@ -403,3 +403,32 @@
 - sklearn MLPRegressor adam solver with relu does NOT converge in 500 iterations on this dataset (ConvergenceWarning)
   — Use lbfgs solver for small datasets: deterministic, no convergence issues, faster
 - T_vib is harder to predict than T_rot (std ratio 277/51.7=5.4x), but 51-channel OES captures it well
+
+## OES-015 - BOSCH plasma etching NetCDF loader + PCA temporal embedding
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- Added load_bosch_oes(path, wafer_key, day_file) to src/data_loader.py
+- Created src/temporal.py: compute_temporal_embedding(), cluster_discharge_phases(), LSTMPredictor, train_lstm()
+- Created scripts/plot_temporal_pca.py: PCA trajectory plot colored by time
+- Added netCDF4>=1.6 to requirements.txt
+
+### BOSCH Dataset Structure (Zenodo:17122442):
+- Day files: Day_2024_07_02.nc to Day_2024_08_22.nc, each with groups Wafer_01..Wafer_10
+- Each wafer group: times (T,), wavelengths (3648,), data (T, 3648) uint16
+- OES rate: ~22.8 Hz (dt=0.044 s), T=14744 time steps per wafer (~648 s run)
+- Wavelengths: 185.9-884.0 nm (3648 channels)
+- Process_data.nc: per wafer, times (3245,) + feature (44,) + data (3245, 44)
+  — Timestamps in process data are RELATIVE (92-784 s) vs OES absolute Unix epoch
+  — Aligned to OES grid via nearest-neighbour interpolation after normalising durations
+
+### Learnings:
+- netCDF4 variables do NOT support dtype kwarg in np.array(): use .astype() instead
+  (np.array(var, dtype=float64) raises TypeError; np.array(var).astype(float64) works)
+- BOSCH OES files use nested groups: Day file → WaferGroup → variables (times, wavelengths, data)
+- Process data has different time axis than OES; normalise both durations before interpolation
+- PCA(20) on 3648-channel spectra: only 12.5% variance in first 2 PCs (many components needed)
+- OES temporal embedding computed with StandardScaler → PCA(20) per time step
+- compute_temporal_embedding returns (embedding, pca) tuple for downstream use
