@@ -224,3 +224,146 @@
 - MaxPool1d(4) reduces dimension quickly; for small inputs, use smaller pool sizes
 - Error handling in Optuna objective prevents trial failures from crashing optimization
 - CNN training is slower than Ridge (~10s/trial vs ~3s/trial) due to neural network overhead
+
+## OES-001 - Download LIBS Benchmark dataset and build HDF5 data loader
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- Extended src/data_loader.py with load_libs_benchmark(path, split, max_spectra_per_class)
+- Created scripts/download_libs_benchmark.py with resume-capable Figshare downloader
+- Downloaded data/libs_benchmark/train.h5, test.h5, test_labels.csv
+
+### Dataset Structure (EMSLIBS Benchmark, Figshare DOI: 10.6084/m9.figshare.c.4768790):
+- train.h5: 100 ore samples × 500 spectra = 50000 total, 40002 channels (gzip-7)
+- HDF5 keys: Spectra/{001..100} shape (40002, 500), Class/1 shape (50000,) 1-based labels
+- Wavelengths/{1} shape (40002,), range ~200-1000 nm
+- 12 unique CLASS LABELS (ore types) in training set, not 100 sample IDs
+- Class/1 array gives ore-type label for each spectrum (1-indexed, ordered by Spectra key)
+- test.h5: ~20000 test spectra; test_labels.csv: 20000 labels (values 1-11, 11 unique classes)
+
+### Learnings:
+- PRD note was inaccurate: dataset has 50000 train spectra (100 samples × 500), not 6000 (12×500)
+- The 12 classes are ORE TYPES embedded in Class/1 array; Spectra keys are 100 individual specimens
+- Class distribution is unequal: range from 2500 to 7500 spectra per ore type
+- HDF5 train.h5 used gzip level 7 compression; some chunks can be corrupted if download is partial
+- Skip corrupted chunks with OSError handler; all 12 classes are still covered by remaining samples
+- test_labels.csv has 11 unique classes (1-11); class 12 not present in test set
+- Download took ~20 minutes at 30-40 MB/s for 7.5 GB file
+- Windows file lock issue when renaming .tmp to .h5; retry or use mv after brief delay
+
+## OES-002 - Download Mesbah Lab CAP dataset and extend data loader
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- Added load_mesbah_cap(path, target) to src/data_loader.py
+
+### Dataset Structure (Mesbah Lab CAP):
+- CSV: no header row (first row IS data); 1258 rows × 56 columns
+- Columns 0-50 (51 cols): N2 2nd-positive OES spectral channels
+- Column 51: power (W), range 1.25-5
+- Column 52: flow (slm), range 1-4
+- Column 53: T_rot (K, rotational temperature), range 300-603.5
+- Column 54: T_vib (K, vibrational temperature), range 2595-3958
+- Column 55: substrate_type (0=glass, 1=metal)
+- Total: 1258 train samples, ~500 test samples
+
+### Learnings:
+- CSV has no explicit header; first row is actual data values
+- The Mesbah Lab notebook uses header=0 which inadvertently drops first data row (1257 vs 1258)
+- Reading with header=None gives 1258 correct samples
+- Spectral columns are positionally fixed (0-50), not auto-detected by name
+- T_rot range ~300-600K, T_vib range ~2600-4000K (temperature regression targets)
+- substrate_type is binary (0/1) classification target
+
+## OES-003 - Add --task classify/regress/temporal CLI mode + update guardrail for micro_f1
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+**micro_f1**: 0.9939 (SVM+PCA, 3-fold CV, LIBS Benchmark 48000 samples)
+
+### Changes Made:
+- Added --task argument to main.py (choices: classify/regress/temporal, default: regress)
+- Added run_classify() function: PCA(50)+SVM(RBF) pipeline
+- Added --model svm choice and --target argument
+- Guardrail already supported micro_f1 maximize mode (no changes needed)
+- Deleted results/best.json for clean reset; guardrail initialized with micro_f1=0.9939
+
+### Learnings:
+- LIBS Benchmark is very separable: PCA(50)+SVM(RBF) achieves micro_f1=0.9939 on 3-fold CV
+- The 12-class ore classification task has very distinct spectral signatures
+- SVM with RBF kernel (C=10, gamma='scale') is highly effective for spectral classification
+- StandardScaler normalization before PCA improves SVM performance
+- 48000 samples (100 specimens × 500 spectra, minus 4 corrupt) with 12 ore types
+- cross_val_predict with n_jobs=1 avoids Windows multiprocessing issues
+- guardrail.py was already updated for micro_f1 (maximize) from a previous session
+
+## OES-004 - Cosmic ray removal in Preprocessor (Z-score spike filter)
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- Added Preprocessor.cosmic_ray_removal(X, threshold=5.0) static method
+- Preprocessor.__init__ now accepts cosmic_ray=True and cosmic_ray_threshold=5.0
+- cosmic_ray_removal applied as first step in Preprocessor.transform()
+- Added --cosmic_ray and --cosmic_ray_threshold CLI args to main.py
+
+### Algorithm:
+- Local 11-channel median: scipy.ndimage.median_filter(spec, size=11, mode='nearest')
+- Z-score: |spectrum - local_median| / std(residuals)
+- Replace spike channels (z-score > threshold) with local_median values
+
+### Learnings:
+- scipy.ndimage.median_filter with size=11 efficiently computes 11-channel rolling median
+- mode='nearest' handles edge effects at spectrum boundaries
+- Unit test: 10x spike at single channel reduced to 0.84x original (threshold=5.0)
+- cosmic_ray=True default but applied only when user explicitly uses --cosmic_ray flag
+- In preprocessing.py, cosmic_ray is False by default to maintain backward compatibility
+
+## OES-005 - Wavelength grid alignment via interpolation (multi-instrument support)
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- Added Preprocessor.align_wavelengths(X, src_wl, tgt_wl) static method
+- Updated load_libs_benchmark() and load_mesbah_cap() to return (X, y, wavelengths_nm)
+- Added --target_wavelengths CLI arg
+
+### Learnings:
+- scipy.interpolate.interp1d with fill_value='extrapolate' handles out-of-range wavelengths
+- LIBS Benchmark wavelengths: 200-1000.02 nm (40002 channels)
+- Mesbah Lab wavelengths: synthetic N2 2nd-positive band 296.2-421.6 nm (51 channels)
+- Breaking change: load_* now returns 3 values; updated all call sites in main.py
+
+## OES-006 - SNR benchmark report for preprocessing pipeline (PRE-02: ≥6 dB)
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+**SNR Gain**: 10.99 dB average (threshold: ≥6 dB), Peak Loss: 0.0%
+
+### Changes Made:
+- Added compute_snr_gain(X_raw, X_denoised) to src/evaluation.py
+- Created scripts/snr_benchmark.py: per-class SNR table on LIBS Benchmark train set
+
+### SNR Formula:
+- signal = mean(|X_raw|) per spectrum (average absolute intensity)
+- noise = std(X_raw - X_smoothed_ref) where smoothed_ref uses SavGol(window=11, order=3) as reference
+- SNR_dB = 20 * log10(signal / noise)
+- SNR before and after denoising compared; gain = SNR_after - SNR_before
+
+### Peak Loss Algorithm:
+- Detect peaks in raw spectrum using scipy.signal.find_peaks (prominence + height thresholds)
+- For each raw peak, check if a matching peak exists in denoised spectrum within ±5% FWHM tolerance
+- Peak loss = fraction of raw peaks with no matching denoised peak
+
+### Learnings:
+- SavGol smoothing yields substantial SNR gain (10.99 dB) on LIBS Benchmark even though spectra are already relatively clean
+- Peak loss is 0.0% — SavGol preserves all detected peaks without shifting their positions
+- High SNR gain is primarily due to high-frequency noise reduction in the 40002-channel spectra
+- compute_snr_gain returns (snr_before_db, snr_after_db, gain_db, peak_loss_pct) as a 4-tuple
+- Per-class benchmarking reveals similar SNR gain across all 12 ore types (consistent across classes)

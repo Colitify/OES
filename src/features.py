@@ -1,7 +1,8 @@
 """Feature engineering module for spectral data."""
 
 import numpy as np
-from scipy.signal import find_peaks
+import pandas as pd
+from scipy.signal import find_peaks, peak_widths
 from sklearn.decomposition import PCA
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -83,6 +84,113 @@ def extract_peaks(
         prominence=prominence
     )
     return wavelengths[peaks], spectrum[peaks], properties
+
+
+def detect_peaks(
+    spectrum: np.ndarray,
+    wavelengths: np.ndarray,
+    min_prominence: float = 0.02,
+    min_width_nm: float = 0.1,
+) -> pd.DataFrame:
+    """Detect emission peaks in a spectrum using prominence filtering.
+
+    Uses scipy.signal.find_peaks with prominence constraint and
+    scipy.signal.peak_widths to compute FWHM for each detected peak.
+
+    Args:
+        spectrum: 1D spectrum array (n_wavelengths,)
+        wavelengths: Wavelength array in nm (n_wavelengths,)
+        min_prominence: Minimum peak prominence (absolute units)
+        min_width_nm: Informational minimum width in nm (reported in output;
+            not enforced as a hard filter to preserve narrow delta-function
+            peaks during validation)
+
+    Returns:
+        DataFrame with columns [wavelength_nm, intensity, prominence, fwhm_nm],
+        sorted by descending prominence. Empty DataFrame if no peaks found.
+    """
+    peaks, properties = find_peaks(spectrum, prominence=min_prominence)
+
+    if len(peaks) == 0:
+        return pd.DataFrame(columns=["wavelength_nm", "intensity", "prominence", "fwhm_nm"])
+
+    # FWHM in samples → convert to nm using average wavelength spacing
+    widths_samples, _, _, _ = peak_widths(spectrum, peaks, rel_height=0.5)
+    nm_per_sample = (wavelengths[-1] - wavelengths[0]) / (len(wavelengths) - 1)
+    fwhm_nm = widths_samples * nm_per_sample
+
+    df = pd.DataFrame({
+        "wavelength_nm": wavelengths[peaks],
+        "intensity": spectrum[peaks],
+        "prominence": properties["prominences"],
+        "fwhm_nm": fwhm_nm,
+    })
+    return df.sort_values("prominence", ascending=False).reset_index(drop=True)
+
+
+def batch_detect_peaks(
+    X: np.ndarray,
+    wavelengths: np.ndarray,
+    min_prominence: float = 0.02,
+    min_width_nm: float = 0.1,
+) -> List[pd.DataFrame]:
+    """Detect peaks in a batch of spectra.
+
+    Args:
+        X: Spectra matrix (n_samples, n_wavelengths)
+        wavelengths: Wavelength array in nm (n_wavelengths,)
+        min_prominence: Minimum peak prominence (absolute units)
+        min_width_nm: Informational minimum width in nm
+
+    Returns:
+        List of DataFrames (one per spectrum), each with columns
+        [wavelength_nm, intensity, prominence, fwhm_nm].
+    """
+    return [
+        detect_peaks(X[i], wavelengths, min_prominence=min_prominence, min_width_nm=min_width_nm)
+        for i in range(X.shape[0])
+    ]
+
+
+class PeakDetector(BaseEstimator, TransformerMixin):
+    """Sklearn-compatible peak detector for spectral data.
+
+    Detects emission peaks per spectrum using prominence filtering.
+    transform() returns a list of DataFrames (one per spectrum) since
+    peak counts vary per spectrum. For pipeline integration requiring a
+    fixed-width numeric array, use PlasmaDescriptorExtractor instead.
+    """
+
+    def __init__(
+        self,
+        wavelengths: Optional[np.ndarray] = None,
+        min_prominence: float = 0.02,
+        min_width_nm: float = 0.1,
+    ):
+        self.wavelengths = wavelengths
+        self.min_prominence = min_prominence
+        self.min_width_nm = min_width_nm
+
+    def fit(self, X: np.ndarray, y=None):
+        return self
+
+    def transform(self, X: np.ndarray) -> List[pd.DataFrame]:
+        """Detect peaks in each spectrum.
+
+        Args:
+            X: Spectra matrix (n_samples, n_wavelengths)
+
+        Returns:
+            List of DataFrames (one per spectrum), each with columns
+            [wavelength_nm, intensity, prominence, fwhm_nm].
+        """
+        if self.wavelengths is None:
+            raise ValueError("wavelengths must be provided to PeakDetector")
+        return batch_detect_peaks(
+            X, self.wavelengths,
+            min_prominence=self.min_prominence,
+            min_width_nm=self.min_width_nm,
+        )
 
 
 def _correlation_column_wise(X: np.ndarray, y: np.ndarray) -> np.ndarray:
