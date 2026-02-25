@@ -158,6 +158,89 @@ def run_classify(args) -> None:
             f"class_{int(c):02d}": float(f1_score(y_mapped, y_pred, labels=[c], average="micro"))
             for c in sorted(set(y_mapped.tolist()))
         }
+
+        # --- SHAP interpretability (OES-013) ---
+        if getattr(args, "explain", False):
+            import torch
+            from sklearn.model_selection import train_test_split
+            from src.evaluation import compute_shap_spectrum
+
+            print("\n[SHAP] Training final model for interpretability...")
+            X_sh_tr, X_sh_val, y_sh_tr, y_sh_val = train_test_split(
+                X_pca, y_mapped, test_size=0.2, stratify=y_mapped, random_state=args.seed + 2
+            )
+            shap_model = Conv1DClassifier(
+                n_classes=n_classes, n_filters=best_params["n_filters"],
+                kernel_size=best_params["kernel_size"], dropout=best_params["dropout"],
+                lr=best_params["lr"],
+            )
+            shap_model = train_classifier(
+                shap_model, X_sh_tr, y_sh_tr, X_sh_val, y_sh_val,
+                epochs=30, batch_size=64, device=device,
+            )
+            shap_model.eval()
+
+            # Save checkpoint for plot_shap.py
+            Path("outputs").mkdir(parents=True, exist_ok=True)
+            ckpt = {
+                "model_state_dict": shap_model.state_dict(),
+                "n_classes": n_classes,
+                "n_pca": n_pca,
+                "best_params": best_params,
+                "pca_components": pca_pre.components_,   # (n_pca, n_wavelengths)
+                "pca_mean": pca_pre.mean_,                # (n_wavelengths,)
+                "scaler_mean": scaler_pre.mean_,          # (n_wavelengths,)
+                "scaler_scale": scaler_pre.scale_,        # (n_wavelengths,)
+                "wavelengths": _wavelengths,
+                "label_map": label_map,
+            }
+            torch.save(ckpt, "outputs/best_model.pt")
+            print("  Saved model checkpoint to outputs/best_model.pt")
+
+            # Compute SHAP on explain_samples
+            n_exp = min(getattr(args, "explain_samples", 50), len(X_pca))
+            n_bg = min(50, len(X_pca))
+            rng_sh = np.random.default_rng(args.seed)
+            bg_idx = rng_sh.choice(len(X_pca), size=n_bg, replace=False)
+            exp_idx = rng_sh.choice(len(X_pca), size=n_exp, replace=False)
+
+            class _PCAProxy:
+                def __init__(self, comp):
+                    self.components_ = comp
+            pca_proxy = _PCAProxy(pca_pre.components_)
+            print(f"  Computing SHAP ({n_bg} background, {n_exp} explain)...")
+            shap_vals = compute_shap_spectrum(
+                shap_model, X_pca[bg_idx], X_pca[exp_idx],
+                wavelengths=_wavelengths, pca=pca_proxy,
+            )
+            mean_abs = np.abs(shap_vals).mean(axis=0)  # (n_wavelengths, n_classes)
+
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
+            from src.features import PLASMA_EMISSION_LINES
+
+            dominant_cls = int(mean_abs.max(axis=0).argmax())
+            shap_1d = mean_abs[:, dominant_cls]
+            fig, ax = plt.subplots(figsize=(14, 5))
+            ax.plot(_wavelengths, shap_1d, lw=0.6, color="steelblue",
+                    label=f"Mean |SHAP| (class {dominant_cls})")
+            colors = plt.cm.tab10.colors
+            for si, (sp, lines) in enumerate(PLASMA_EMISSION_LINES.items()):
+                col = colors[si % len(colors)]
+                for li, ln in enumerate(lines):
+                    ax.axvline(ln, color=col, alpha=0.5, lw=0.8, linestyle="--",
+                               label=sp if li == 0 else None)
+            ax.set_xlabel("Wavelength (nm)")
+            ax.set_ylabel("Mean |SHAP value|")
+            ax.set_title("SHAP Spectrum Attribution with Plasma Emission Line Overlay")
+            ax.legend(loc="upper right", fontsize=7, ncol=2)
+            ax.grid(True, alpha=0.2)
+            plt.tight_layout()
+            fig_path = Path("outputs/shap_overlay.png")
+            fig.savefig(str(fig_path), dpi=150, bbox_inches="tight")
+            plt.close(fig)
+            print(f"  Saved SHAP overlay to {fig_path}")
     else:
         if args.model == "svm":
             clf = SVC(kernel="rbf", C=10, gamma="scale", probability=False, random_state=args.seed)
@@ -411,6 +494,12 @@ def main():
         help="Enable MC-Dropout uncertainty quantification and temperature scaling calibration (CNN only)")
     parser.add_argument("--n_mc_samples", type=int, default=50,
         help="Number of MC-Dropout forward passes for uncertainty estimation (default 50)")
+
+    # SHAP interpretability (OES-013)
+    parser.add_argument("--explain", action="store_true",
+        help="Compute SHAP attribution overlays on CNN classifier and save figure (CNN only)")
+    parser.add_argument("--explain_samples", type=int, default=50,
+        help="Number of samples to explain with SHAP (default 50)")
 
     args = parser.parse_args()
 
