@@ -186,8 +186,64 @@ def run_classify(args) -> None:
     print(f"  macro_f1  = {macro_f1:.4f}")
     print(f"  accuracy  = {acc:.4f}")
 
+    # --- MC-Dropout + Temperature Scaling (OES-012, CNN only) ---
+    ece_val: float | None = None
+    calibrated_micro_f1: float | None = None
+    if getattr(args, "mc_dropout", False) and args.model == "cnn":
+        from sklearn.model_selection import train_test_split
+        from src.models.deep_learning import predict_with_uncertainty, _get_safe_device
+        from src.models.calibration import TemperatureScaling
+        from src.evaluation import compute_ece
+        import torch
+
+        device_mc = _get_safe_device()
+        print("\n[MC-Dropout] Training final model for uncertainty/calibration...")
+        # Train final model on 80% of PCA data
+        X_fin_tr, X_fin_val, y_fin_tr, y_fin_val = train_test_split(
+            X_pca, y_mapped, test_size=0.2, stratify=y_mapped, random_state=args.seed + 1
+        )
+        final_model = Conv1DClassifier(
+            n_classes=n_classes, n_filters=best_params["n_filters"],
+            kernel_size=best_params["kernel_size"], dropout=best_params["dropout"],
+            lr=best_params["lr"],
+        )
+        final_model = train_classifier(
+            final_model, X_fin_tr, y_fin_tr, X_fin_val, y_fin_val,
+            epochs=30, batch_size=64, device=device_mc,
+        )
+
+        # MC-Dropout uncertainty on val set
+        n_mc = getattr(args, "n_mc_samples", 50)
+        print(f"  MC-Dropout: {n_mc} samples...")
+        mean_probs, std_probs = predict_with_uncertainty(final_model, X_fin_val, n_samples=n_mc, device=device_mc)
+        ece_before = compute_ece(mean_probs, y_fin_val)
+        print(f"  ECE before calibration: {ece_before:.4f}")
+
+        # Collect logits on val set for temperature scaling
+        final_model.eval()
+        with torch.no_grad():
+            val_logits = final_model(torch.FloatTensor(X_fin_val).to(device_mc)).cpu().numpy()
+        ts = TemperatureScaling()
+        ts.fit(val_logits, y_fin_val)
+        cal_probs = ts.transform(val_logits)
+        ece_val = compute_ece(cal_probs, y_fin_val)
+        print(f"  ECE after calibration (T={ts.T:.3f}): {ece_val:.4f}")
+        calibrated_micro_f1 = float(f1_score(y_fin_val, cal_probs.argmax(axis=1), average="micro"))
+        print(f"  Calibrated micro_f1: {calibrated_micro_f1:.4f}")
+
     # --- Write metrics.json ---
     if args.metrics_out:
+        metrics_dict: dict = {
+            "micro_f1": micro_f1,
+            "macro_f1": macro_f1,
+            "accuracy": acc,
+            "per_class_f1": per_class_f1,
+        }
+        if ece_val is not None:
+            metrics_dict["ece"] = ece_val
+        if calibrated_micro_f1 is not None:
+            metrics_dict["calibrated_micro_f1"] = calibrated_micro_f1
+
         payload = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "git_sha": get_git_sha(),
@@ -196,12 +252,7 @@ def run_classify(args) -> None:
             "cv_folds": args.cv,
             "seed": args.seed,
             "primary_metric": {"name": "micro_f1", "value": micro_f1},
-            "metrics": {
-                "micro_f1": micro_f1,
-                "macro_f1": macro_f1,
-                "accuracy": acc,
-                "per_class_f1": per_class_f1,
-            },
+            "metrics": metrics_dict,
         }
         out_path = Path(args.metrics_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -354,6 +405,12 @@ def main():
     parser.add_argument("--normalize_sum100", action="store_true",
         help="After prediction, rescale element concentrations so Σ(wt%%)=100 "
              "(closure constraint; Noll et al. 2014)")
+
+    # MC-Dropout uncertainty + calibration (OES-012)
+    parser.add_argument("--mc_dropout", action="store_true",
+        help="Enable MC-Dropout uncertainty quantification and temperature scaling calibration (CNN only)")
+    parser.add_argument("--n_mc_samples", type=int, default=50,
+        help="Number of MC-Dropout forward passes for uncertainty estimation (default 50)")
 
     args = parser.parse_args()
 

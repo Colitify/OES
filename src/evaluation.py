@@ -448,6 +448,46 @@ def compute_snr_gain(
     return snr_before_db, snr_after_db, gain_db, peak_loss_pct
 
 
+def compute_ece(
+    probs: np.ndarray,
+    y_true: np.ndarray,
+    n_bins: int = 15,
+) -> float:
+    """Compute Expected Calibration Error (ECE).
+
+    Bins predictions by max confidence and measures the gap between
+    average confidence and average accuracy in each bin.
+
+    Args:
+        probs: Predicted probability array (n_samples, n_classes); rows sum to 1.
+        y_true: True integer class labels (n_samples,).
+        n_bins: Number of equal-width bins in [0, 1] (default 15).
+
+    Returns:
+        ECE as a float in [0, 1]. Lower is better; 0 = perfect calibration.
+    """
+    probs = np.asarray(probs)
+    y_true = np.asarray(y_true)
+    confidences = probs.max(axis=1)
+    predictions = probs.argmax(axis=1)
+    accuracies = (predictions == y_true).astype(float)
+
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    ece = 0.0
+    n = len(y_true)
+
+    for i in range(n_bins):
+        lo, hi = bin_edges[i], bin_edges[i + 1]
+        mask = (confidences >= lo) & (confidences < hi) if i < n_bins - 1 else (confidences >= lo) & (confidences <= hi)
+        if mask.sum() == 0:
+            continue
+        bin_acc = float(accuracies[mask].mean())
+        bin_conf = float(confidences[mask].mean())
+        ece += (mask.sum() / n) * abs(bin_acc - bin_conf)
+
+    return float(ece)
+
+
 def evaluate_classifier(
     model: Any,
     X: np.ndarray,
