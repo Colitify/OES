@@ -148,6 +148,34 @@ class Preprocessor(BaseEstimator, TransformerMixin):
     """Sklearn-compatible preprocessor for spectral data."""
 
     @staticmethod
+    def align_wavelengths(
+        X: np.ndarray,
+        src_wl: np.ndarray,
+        tgt_wl: np.ndarray,
+    ) -> np.ndarray:
+        """Align spectra from source wavelength grid to target wavelength grid via interpolation.
+
+        Uses scipy.interpolate.interp1d with linear interpolation and extrapolation
+        to map each spectrum from src_wl to tgt_wl.
+
+        Args:
+            X: Spectra matrix of shape (n_samples, n_src_channels)
+            src_wl: Source wavelength array of shape (n_src_channels,), in nm
+            tgt_wl: Target wavelength array of shape (n_tgt_channels,), in nm
+
+        Returns:
+            X_aligned: ndarray of shape (n_samples, n_tgt_channels), float32
+        """
+        from scipy.interpolate import interp1d
+
+        interpolator = interp1d(
+            src_wl, X, kind="linear", axis=1,
+            fill_value="extrapolate", bounds_error=False,
+        )
+        X_aligned = interpolator(tgt_wl).astype(np.float32)
+        return X_aligned
+
+    @staticmethod
     def cosmic_ray_removal(X: np.ndarray, threshold: float = 5.0) -> np.ndarray:
         """Remove cosmic ray spikes from spectra using local median filtering.
 

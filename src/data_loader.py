@@ -157,7 +157,7 @@ def load_libs_benchmark(
     path: Union[str, Path],
     split: str = "train",
     max_spectra_per_class: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load LIBS Benchmark HDF5 dataset (Figshare, 12 classes, 40002 channels).
 
     File structure (from official reader):
@@ -174,6 +174,7 @@ def load_libs_benchmark(
     Returns:
         X: ndarray of shape (n_samples, 40002), float32
         y: ndarray of shape (n_samples,), int64 class labels 0–11
+        wavelengths_nm: ndarray of shape (40002,), float64, wavelengths in nm
     """
     import h5py
 
@@ -187,6 +188,11 @@ def load_libs_benchmark(
                 f"{h5_path} not found. Run data/libs_benchmark/download.py to fetch the dataset."
             )
         with h5py.File(h5_path, "r") as f:
+            # --- wavelengths ---
+            wl_group = f["Wavelengths"]
+            wl_key = list(wl_group.keys())[0]
+            wavelengths_nm = np.array(wl_group[wl_key], dtype=np.float64)  # (40002,)
+
             # --- class labels (1-based ore-type IDs from Class/1 array) ---
             raw_labels = np.array(f["Class"]["1"]).astype(np.int64)  # (n_total,) 1-based
 
@@ -221,7 +227,7 @@ def load_libs_benchmark(
         with open(class_map_path, "w") as cm:
             json.dump(class_map, cm, indent=2)
 
-        return X, y
+        return X, y, wavelengths_nm
 
     else:  # test split
         h5_path = path / "test.h5"
@@ -229,6 +235,13 @@ def load_libs_benchmark(
         if not h5_path.exists():
             raise FileNotFoundError(f"{h5_path} not found.")
         with h5py.File(h5_path, "r") as f:
+            # Read wavelengths from test.h5 if available (same grid as train)
+            try:
+                wl_group = f["Wavelengths"]
+                wl_key = list(wl_group.keys())[0]
+                wavelengths_nm = np.array(wl_group[wl_key], dtype=np.float64)
+            except KeyError:
+                wavelengths_nm = np.linspace(200.0, 1000.0, 40002)
             unknown_group = f["UNKNOWN"]
             sample_keys = sorted(unknown_group.keys())
             spectra_list = []
@@ -242,13 +255,13 @@ def load_libs_benchmark(
         else:
             y = np.full(X.shape[0], -1, dtype=np.int64)
 
-        return X, y
+        return X, y, wavelengths_nm
 
 
 def load_mesbah_cap(
     path: Union[str, Path],
     target: str = "T_rot",
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load Mesbah Lab CAP dataset (N2 OES + Trot/Tvib/operating conditions).
 
     CSV structure (no named header — first row IS data):
@@ -267,6 +280,7 @@ def load_mesbah_cap(
     Returns:
         X: ndarray of shape (n_samples, 51), spectral features, float32
         y: ndarray of shape (n_samples,), target values
+        wavelengths_nm: ndarray of shape (51,), approximate N2 2nd-positive band wavelengths
     """
     # Column index mapping (0-based, after reading without header)
     _TARGET_COL = {
@@ -276,7 +290,6 @@ def load_mesbah_cap(
         "T_vib": 54,
         "substrate_type": 55,
     }
-    _NON_SPECTRAL = set(_TARGET_COL.values())  # columns 51-55
     N_SPECTRAL = 51  # columns 0-50
 
     if target not in _TARGET_COL:
@@ -293,7 +306,10 @@ def load_mesbah_cap(
     else:
         y = y.astype(np.float32)
 
-    return X, y
+    # N2 2nd-positive transition wavelengths (approximate range 300-420 nm, 51 channels)
+    wavelengths_nm = np.linspace(296.2, 421.6, N_SPECTRAL)
+
+    return X, y, wavelengths_nm
 
 
 def load_large_csv(

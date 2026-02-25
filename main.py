@@ -63,7 +63,7 @@ def run_classify(args) -> None:
     print("\n[1/3] Loading data...")
     train_path = Path(args.train)
     if train_path.suffix in (".h5", ".hdf5"):
-        X, y = load_libs_benchmark(str(train_path.parent), split="train")
+        X, y, _wavelengths = load_libs_benchmark(str(train_path.parent), split="train")
     else:
         raise ValueError(f"Unsupported file format for classify task: {train_path.suffix}. Use .h5 files.")
     print(f"  Loaded: X={X.shape}, classes={len(set(y.tolist()))}")
@@ -145,6 +145,9 @@ def main():
     parser.add_argument("--target_cols", type=str, nargs="+", default=None, help="Target column names")
     parser.add_argument("--target", type=str, default=None,
                         help="Target column name for regress task (e.g. T_rot, T_vib, substrate_type)")
+    parser.add_argument("--target_wavelengths", type=str, default=None,
+                        help="Path to CSV file with target wavelength grid (nm). "
+                             "If not specified, uses dataset native grid.")
     parser.add_argument(
         "--model",
         type=str,
