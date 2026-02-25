@@ -22,3 +22,6 @@ ipykernel>=6.0
 
 # Progress bars
 tqdm>=4.62
+
+# Interpretability (OES-013)
+shap>=0.44

@@ -448,6 +448,73 @@ def compute_snr_gain(
     return snr_before_db, snr_after_db, gain_db, peak_loss_pct
 
 
+def compute_shap_spectrum(
+    model: Any,
+    X_background: np.ndarray,
+    X_explain: np.ndarray,
+    wavelengths: Optional[np.ndarray] = None,
+    pca: Any = None,
+) -> np.ndarray:
+    """Compute SHAP values for a Conv1DClassifier using GradientExplainer.
+
+    Uses shap.GradientExplainer to attribute each class prediction to input
+    features. If pca is provided, SHAP values in PCA space are projected back
+    to wavelength space via PCA component vectors.
+
+    Args:
+        model: Trained Conv1DClassifier (PyTorch nn.Module).
+        X_background: Background spectra for SHAP baseline (n_bg, n_features).
+        X_explain: Spectra to explain (n_explain, n_features).
+        wavelengths: Wavelength array in nm (n_wavelengths,). Informational;
+            used only when pca is None to determine output channels.
+        pca: Optional fitted sklearn PCA object. If provided, SHAP values are
+            projected from PCA space → wavelength space using pca.components_.
+
+    Returns:
+        shap_values: ndarray of shape (n_explain, n_out_features, n_classes),
+            where n_out_features = n_wavelengths (if pca provided) or
+            n_features (if pca is None).
+    """
+    import shap
+    import torch
+
+    device = "cpu"  # GradientExplainer runs on CPU for stability
+    model_cpu = model.to(device).eval()
+
+    # Feed as (batch, 1, n_features) for Conv1D forward compatibility
+    X_bg_t = torch.FloatTensor(X_background[:, np.newaxis, :])
+    X_exp_t = torch.FloatTensor(X_explain[:, np.newaxis, :])
+
+    explainer = shap.GradientExplainer(model_cpu, X_bg_t)
+    raw_shap = explainer.shap_values(X_exp_t)
+    # raw_shap shape: (n_explain, 1, n_features, n_classes) — numpy array from GradientExplainer
+
+    n_explain = X_explain.shape[0]
+    n_features = X_explain.shape[1]
+
+    if isinstance(raw_shap, list):
+        # Older shap versions return list of (n_explain, 1, n_features) per class
+        n_classes = len(raw_shap)
+        shap_arr = np.stack([sv[:, 0, :] for sv in raw_shap], axis=-1)  # (n_explain, n_features, n_classes)
+    else:
+        # Newer shap versions return (n_explain, 1, n_features, n_classes)
+        shap_arr = raw_shap[:, 0, :, :]  # (n_explain, n_features, n_classes)
+        n_classes = shap_arr.shape[-1]
+
+    if pca is not None:
+        # Project from PCA space to wavelength space
+        # pca.components_ is (n_components, n_wavelengths)
+        n_wl = pca.components_.shape[1]
+        shap_wl = np.zeros((n_explain, n_wl, n_classes), dtype=np.float32)
+        for c in range(n_classes):
+            # shap_arr[:, :, c] is (n_explain, n_pca)
+            # components_.T is (n_wavelengths, n_pca)
+            shap_wl[:, :, c] = shap_arr[:, :, c] @ pca.components_  # (n_explain, n_wavelengths)
+        return shap_wl
+
+    return shap_arr.astype(np.float32)
+
+
 def compute_ece(
     probs: np.ndarray,
     y_true: np.ndarray,
