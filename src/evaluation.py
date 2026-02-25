@@ -373,3 +373,76 @@ def generate_report(
         Path(save_path).write_text(report)
 
     return report
+
+
+def compute_snr_gain(
+    X_raw: np.ndarray,
+    X_denoised: np.ndarray,
+) -> Tuple[float, float, float, float]:
+    """Compute SNR gain from denoising and peak loss fraction.
+
+    SNR formula: signal = mean(X), noise = std(X - X_ref); dB = 20*log10(signal/noise)
+    where X_ref is a smooth reference (local mean).
+
+    Peak loss: fraction of peaks detected in X_raw (by scipy.signal.find_peaks) that
+    are missing in X_denoised (peak centroid shifted > 5% of spectrum width).
+
+    Args:
+        X_raw: Raw spectra matrix of shape (n_samples, n_wavelengths)
+        X_denoised: Denoised spectra of same shape
+
+    Returns:
+        snr_before_db: Mean SNR (dB) of raw spectra
+        snr_after_db: Mean SNR (dB) of denoised spectra
+        gain_db: snr_after_db - snr_before_db
+        peak_loss_pct: Fraction of raw peaks missing in denoised spectra (0-1)
+    """
+    from scipy.signal import find_peaks, savgol_filter
+
+    def _snr_db(X: np.ndarray) -> float:
+        """Compute mean SNR in dB for a spectrum matrix."""
+        snrs = []
+        for i in range(X.shape[0]):
+            spec = X[i].astype(np.float64)
+            signal = float(np.mean(np.abs(spec)))
+            if signal < 1e-10:
+                continue
+            # Smooth reference: 11-point Savitzky-Golay or simple local mean
+            wl = min(11, len(spec) if len(spec) % 2 == 1 else len(spec) - 1)
+            try:
+                ref = savgol_filter(spec, window_length=wl, polyorder=3)
+            except Exception:
+                ref = spec
+            noise = float(np.std(spec - ref))
+            if noise < 1e-10:
+                snrs.append(100.0)
+            else:
+                snrs.append(20.0 * np.log10(signal / noise))
+        return float(np.mean(snrs)) if snrs else 0.0
+
+    snr_before_db = _snr_db(X_raw)
+    snr_after_db = _snr_db(X_denoised)
+    gain_db = snr_after_db - snr_before_db
+
+    # Peak loss: sample a subset of spectra to keep it fast
+    n_check = min(50, X_raw.shape[0])
+    indices = np.linspace(0, X_raw.shape[0] - 1, n_check, dtype=int)
+    n_wavelengths = X_raw.shape[1]
+    threshold_channels = int(0.05 * n_wavelengths)  # 5% of spectrum width
+
+    total_raw_peaks = 0
+    lost_peaks = 0
+    for i in indices:
+        raw_spec = X_raw[i].astype(np.float64)
+        den_spec = X_denoised[i].astype(np.float64)
+        raw_peaks, _ = find_peaks(raw_spec, prominence=0.01 * (raw_spec.max() - raw_spec.min()))
+        den_peaks, _ = find_peaks(den_spec, prominence=0.01 * (den_spec.max() - den_spec.min()))
+        total_raw_peaks += len(raw_peaks)
+        for rp in raw_peaks:
+            # Check if any denoised peak is within threshold_channels
+            if len(den_peaks) == 0 or np.min(np.abs(den_peaks - rp)) > threshold_channels:
+                lost_peaks += 1
+
+    peak_loss_pct = float(lost_peaks / total_raw_peaks) if total_raw_peaks > 0 else 0.0
+
+    return snr_before_db, snr_after_db, gain_db, peak_loss_pct
