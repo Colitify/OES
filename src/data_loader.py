@@ -245,6 +245,57 @@ def load_libs_benchmark(
         return X, y
 
 
+def load_mesbah_cap(
+    path: Union[str, Path],
+    target: str = "T_rot",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Load Mesbah Lab CAP dataset (N2 OES + Trot/Tvib/operating conditions).
+
+    CSV structure (no named header — first row IS data):
+        Columns 0-50  : 51 OES spectral channels (N2 2nd-positive transition)
+        Column  51    : power  (W)
+        Column  52    : flow   (slm)
+        Column  53    : T_rot  (K, rotational temperature)
+        Column  54    : T_vib  (K, vibrational temperature)
+        Column  55    : substrate_type (0 = glass, 1 = metal)
+
+    Args:
+        path: Path to the CSV file (dat_train.csv or dat_test.csv)
+        target: Target column name; one of 'T_rot', 'T_vib', 'substrate_type',
+                'power', 'flow'
+
+    Returns:
+        X: ndarray of shape (n_samples, 51), spectral features, float32
+        y: ndarray of shape (n_samples,), target values
+    """
+    # Column index mapping (0-based, after reading without header)
+    _TARGET_COL = {
+        "power": 51,
+        "flow": 52,
+        "T_rot": 53,
+        "T_vib": 54,
+        "substrate_type": 55,
+    }
+    _NON_SPECTRAL = set(_TARGET_COL.values())  # columns 51-55
+    N_SPECTRAL = 51  # columns 0-50
+
+    if target not in _TARGET_COL:
+        raise ValueError(
+            f"Unknown target '{target}'. Choose from: {list(_TARGET_COL.keys())}"
+        )
+
+    df = pd.read_csv(path, header=None)  # read without header (first row is data)
+    X = df.iloc[:, :N_SPECTRAL].values.astype(np.float32)
+    y = df.iloc[:, _TARGET_COL[target]].values
+
+    if target == "substrate_type":
+        y = y.astype(np.int64)
+    else:
+        y = y.astype(np.float32)
+
+    return X, y
+
+
 def load_large_csv(
     filepath: Union[str, Path],
     chunksize: int = 500,
