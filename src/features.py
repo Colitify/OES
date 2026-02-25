@@ -56,6 +56,68 @@ NIST_EMISSION_LINES_CR_CLEAN: Dict[str, list] = {
     "Cr": [267.716, 357.869, 425.433],
 }
 
+# OES-008: Plasma OES emission line dictionary for high-voltage electrical discharge.
+# Species: N2 molecular bands, N2+ ionic bands, atomic N/H/O, noble gas Ar.
+# Sources: NIST ASD (https://physics.nist.gov/asd), Pearse & Gaydon "Identification of
+#   Molecular Spectra", Laux et al. (2003) Plasma Sources Sci. Technol.
+PLASMA_EMISSION_LINES: Dict[str, list] = {
+    # N2 2nd positive system (C³Πu → B³Πg): prominent UV-vis bands in N2/air plasma
+    "N2_2pos":  [315.9, 337.1, 357.7, 380.5],
+    # N2+ 1st negative system (B²Σu+ → X²Σg+): marker of high-energy electrons
+    "N2p_1neg": [391.4, 427.8],
+    # Atomic nitrogen (N I) — visible NIR lines
+    "N_I":      [746.8, 818.5, 862.9],
+    # Hydrogen Balmer series — discharge gas contamination / water vapor indicator
+    "H_alpha":  [656.3],
+    "H_beta":   [486.1],
+    # Atomic oxygen (O I) — air entrainment / oxygen plasma marker
+    "O_I":      [777.4, 844.6, 926.6],
+    # Argon I (Ar I) — noble gas discharge / Paschen lines
+    "Ar_I":     [696.5, 706.7, 738.4, 750.4, 763.5, 772.4],
+}
+
+# Per-species window half-widths (nm) for PLASMA_EMISSION_LINES.
+# Wider windows for broad molecular bands (N2_2pos) and Balmer lines (H_alpha, H_beta).
+PLASMA_DELTA_NM: Dict[str, float] = {
+    "N2_2pos":  2.0,
+    "N2p_1neg": 1.5,
+    "N_I":      1.0,
+    "H_alpha":  2.0,
+    "H_beta":   2.0,
+    "O_I":      1.0,
+    "Ar_I":     1.0,
+}
+
+
+def select_wavelengths_plasma(
+    wavelengths: np.ndarray,
+    species: Optional[List[str]] = None,
+) -> np.ndarray:
+    """Return a boolean mask selecting channels near plasma OES emission lines.
+
+    Uses PLASMA_EMISSION_LINES and PLASMA_DELTA_NM to define ±window windows
+    around each emission line for the requested plasma species.
+
+    Args:
+        wavelengths: Array of wavelength values in nm (n_wavelengths,).
+        species: List of species keys to include (e.g. ['N2_2pos', 'Ar_I']).
+            None selects all species in PLASMA_EMISSION_LINES.
+
+    Returns:
+        Boolean mask of shape (n_wavelengths,); True where the channel falls
+        within a plasma emission window.
+    """
+    if species is None:
+        species = list(PLASMA_EMISSION_LINES.keys())
+
+    mask = np.zeros(len(wavelengths), dtype=bool)
+    for sp in species:
+        delta = PLASMA_DELTA_NM.get(sp, 1.0)
+        for line_nm in PLASMA_EMISSION_LINES.get(sp, []):
+            mask |= np.abs(wavelengths - line_nm) <= delta
+
+    return mask
+
 
 def extract_peaks(
     spectrum: np.ndarray,
