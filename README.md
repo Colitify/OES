@@ -1,197 +1,273 @@
-# OES/LIBS Spectral Analysis Toolkit
+# Plasma OES Spectral Analysis Toolkit
 
-A Python-based toolkit for analyzing optical emission spectroscopy (OES) and laser-induced breakdown spectroscopy (LIBS) data using machine learning.
+A Python toolkit for **machine learning on plasma optical emission spectroscopy (OES)** data —
+species classification, temperature regression, and temporal evolution analysis.
 
-## Features
+**Primary dataset**: LIBS Benchmark (Figshare, 12 classes, 40 002 channels, 200–1000 nm)
+**Secondary datasets**: Mesbah Lab CAP (N₂ OES, T_rot / T_vib), BOSCH Plasma Etching (25 Hz time-series)
 
-- **Data Loading**: Support for LIBS contest format CSV files with automatic wavelength and target extraction
-- **Preprocessing**: Baseline correction (ALS), smoothing (Savitzky-Golay), normalization (SNV, MinMax, L2)
-- **Feature Engineering**: PCA, PLS, wavelength selection, peak detection
-- **Traditional ML Models**: PLS, Ridge, Lasso, ElasticNet, Random Forest, SVR
-- **Deep Learning Models**: 1D-CNN, LSTM, Transformer
-- **Hyperparameter Optimization**: Optuna and GridSearchCV support
-- **Evaluation**: Cross-validation, metrics comparison, visualization
+---
+
+## Prerequisites
+
+- **Python** 3.9 or later (3.11 recommended)
+- **conda** or **pip** for package management
+- ~2 GB free disk space (datasets)
+
+---
+
+## Installation
+
+### 1 · Create and activate environment
+
+```bash
+# Using conda (recommended):
+conda create -n oes_env python=3.11 -y
+conda activate oes_env
+
+# Or using venv:
+python -m venv venv
+source venv/bin/activate   # Linux/Mac
+venv\Scripts\activate      # Windows
+```
+
+### 2 · Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3 · Download datasets
+
+**LIBS Benchmark** (Figshare, CC-BY-4.0):
+
+```bash
+# Download train.h5, test.h5, test_labels.csv
+# from https://springernature.figshare.com/collections/Benchmark_classification_dataset_for_laser-induced_breakdown_spectroscopy/4768790
+# Place in: data/libs_benchmark/
+mkdir -p data/libs_benchmark
+# (manual download or use provided script):
+python data/libs_benchmark/download.py
+```
+
+**Mesbah Lab CAP** (GitHub):
+
+```bash
+git clone https://github.com/Mesbah-Lab-UCB/Machine-Learning-for-Plasma-Diagnostics data/mesbah_cap_repo
+cp data/mesbah_cap_repo/dat_*.csv data/mesbah_cap/
+```
+
+**BOSCH Plasma Etching** (Zenodo):
+
+```bash
+# Download from https://zenodo.org/records/17122442
+# Place NetCDF files (Day_*.nc, Process_data.nc) in: data/bosch_oes/
+mkdir -p data/bosch_oes
+```
+
+### 4 · Register Jupyter kernel (for tutorial notebooks)
+
+```bash
+python -m ipykernel install --user --name oes_env --display-name "Python (oes_env)"
+```
+
+---
+
+## Quick Start
+
+### Task 1 · Species classification (LIBS Benchmark)
+
+```bash
+# SVM with 5-fold CV (fast baseline)
+python main.py \
+  --task classify \
+  --train data/libs_benchmark/train.h5 \
+  --model svm --cv 5 --seed 42 \
+  --metrics_out results/metrics.json
+
+# CNN with Optuna HPO (best performance)
+python main.py \
+  --task classify \
+  --train data/libs_benchmark/train.h5 \
+  --model cnn --cv 5 --seed 42 \
+  --metrics_out results/metrics.json
+```
+
+Expected output: `results/metrics.json` with `primary_metric.name = "micro_f1"`.
+
+### Task 2 · Temperature regression (Mesbah Lab CAP)
+
+```bash
+python main.py \
+  --task regress \
+  --train data/mesbah_cap/dat_train.csv \
+  --target T_rot \
+  --model ann --per_target --cv 5 --seed 42 \
+  --metrics_out results/metrics_cap.json
+
+# Standalone benchmark (both T_rot and T_vib):
+python scripts/evaluate_cap.py
+```
+
+Expected: T_rot RMSE ≤ 50 K, T_vib RMSE ≤ 200 K.
+
+### Task 3 · Temporal OES analysis (BOSCH etching)
+
+```bash
+# PCA trajectory plot
+python scripts/plot_temporal_pca.py --data data/bosch_oes/
+
+# Discharge phase clustering (DTW K-means, k=4)
+python scripts/plot_clusters.py --data data/bosch_oes/ --k 4
+
+# LSTM next-step predictor
+python scripts/train_temporal.py --data data/bosch_oes/ --epochs 50
+```
+
+---
+
+## Tutorial Notebooks
+
+Run the interactive tutorial notebooks (require dataset downloads):
+
+```bash
+# Preprocessing pipeline
+jupyter nbconvert --to notebook --execute notebooks/01_preprocessing.ipynb --output-dir notebooks/
+
+# Species classification + SHAP
+jupyter nbconvert --to notebook --execute notebooks/02_classification.ipynb --output-dir notebooks/
+
+# Temporal analysis + DTW clustering
+jupyter nbconvert --to notebook --execute notebooks/03_temporal_analysis.ipynb --output-dir notebooks/
+```
+
+Or launch interactively:
+```bash
+jupyter notebook notebooks/
+```
+
+---
+
+## Run Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+All 37 unit tests cover preprocessing, feature extraction, classification evaluation, and temporal analysis.
+
+---
 
 ## Project Structure
 
 ```
 libs-spectral-analysis/
-├── .claude/
-│   └── skills/
-│       └── oes-libs-spectral-analysis/    # Claude Code skill
 ├── data/
-│   ├── train_dataset_RAW.csv              # Training data
-│   └── test_dataset_RAW.csv               # Test data
+│   ├── libs_benchmark/          # LIBS Benchmark HDF5 files
+│   ├── mesbah_cap/              # Mesbah Lab CAP CSV files
+│   └── bosch_oes/               # BOSCH NetCDF files
 ├── src/
-│   ├── __init__.py
-│   ├── data_loader.py                     # Data loading module
-│   ├── preprocessing.py                   # Preprocessing module
-│   ├── features.py                        # Feature engineering module
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── traditional.py                 # Traditional ML models
-│   │   └── deep_learning.py               # Deep learning models
-│   ├── optimization.py                    # Hyperparameter optimization
-│   └── evaluation.py                      # Evaluation and visualization
+│   ├── data_loader.py           # load_libs_benchmark, load_mesbah_cap, load_bosch_oes
+│   ├── preprocessing.py         # Preprocessor (ALS, SavGol, SNV, cosmic-ray removal)
+│   ├── features.py              # detect_peaks, PlasmaDescriptorExtractor, NIST windows
+│   ├── temporal.py              # PCA embedding, DTW clustering, LSTM predictor
+│   ├── evaluation.py            # evaluate_classifier, compute_ece, compute_snr_gain
+│   ├── guardrail.py             # Regression guardrail for CI
+│   └── models/
+│       ├── traditional.py       # SVM, Ridge, PLS, RF
+│       └── deep_learning.py     # Conv1DClassifier, Conv1DRegressor, train_classifier
 ├── notebooks/
-│   ├── 01_data_exploration.ipynb          # Data exploration
-│   ├── 02_preprocessing.ipynb             # Preprocessing experiments
-│   ├── 03_traditional_ml.ipynb            # Traditional ML experiments
-│   ├── 04_deep_learning.ipynb             # Deep learning experiments
-│   └── 05_final_submission.ipynb          # Final submission
-├── outputs/
-│   ├── models/                            # Saved models
-│   ├── predictions/                       # Prediction results
-│   └── figures/                           # Figures and plots
-├── requirements.txt
-├── README.md
-└── main.py                                # Main pipeline script
+│   ├── 01_preprocessing.ipynb   # Preprocessing tutorial (LIBS Benchmark)
+│   ├── 02_classification.ipynb  # SVM+CNN + SHAP tutorial
+│   └── 03_temporal_analysis.ipynb # PCA trajectory + DTW tutorial
+├── scripts/
+│   ├── evaluate_cap.py          # Standalone CAP T_rot/T_vib benchmark
+│   ├── plot_temporal_pca.py     # BOSCH PCA trajectory plot
+│   ├── plot_clusters.py         # BOSCH DTW cluster plot
+│   ├── train_temporal.py        # LSTM training on BOSCH data
+│   └── create_notebooks.py      # Notebook generator (nbformat)
+├── tests/
+│   ├── test_preprocessing.py    # Preprocessor unit tests
+│   ├── test_features.py         # Feature extraction unit tests
+│   ├── test_classifier.py       # Classifier evaluation unit tests
+│   └── test_temporal.py         # Temporal analysis unit tests
+├── results/
+│   ├── metrics.json             # Classification metrics (micro_f1)
+│   └── metrics_cap.json         # CAP regression metrics (RMSE)
+├── main.py                      # Unified CLI entry point
+└── requirements.txt
 ```
 
-## Installation
-
-1. Create and activate a virtual environment:
-```bash
-conda activate pytorch_env
-# or
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Quick Start
-
-### Using the Command Line
-
-```bash
-# Basic training
-python main.py --train data/train_dataset_RAW.csv --model ridge
-
-# With hyperparameter optimization
-python main.py --train data/train_dataset_RAW.csv --model ridge --optimize
-
-# Compare all models
-python main.py --train data/train_dataset_RAW.csv --model all
-
-# Generate test predictions
-python main.py --train data/train_dataset_RAW.csv --test data/test_dataset_RAW.csv --model ridge
-```
-
-### Using Python API
-
-```python
-from src.data_loader import SpectralDataset
-from src.preprocessing import Preprocessor
-from src.features import FeatureExtractor
-from src.models.traditional import get_traditional_models, train_traditional_model
-from src.evaluation import evaluate_model
-
-# 1. Load data
-data = SpectralDataset.from_csv("data/train_dataset_RAW.csv", n_wavelengths=40002)
-
-# 2. Preprocess
-preprocessor = Preprocessor(baseline="als", normalize="snv", denoise="savgol")
-X = preprocessor.fit_transform(data.spectra)
-
-# 3. Feature extraction
-extractor = FeatureExtractor(method="pca", n_components=50)
-X_feat = extractor.fit_transform(X, data.targets)
-
-# 4. Train model
-models = get_traditional_models()
-model = train_traditional_model(models["ridge"], X_feat, data.targets)
-
-# 5. Evaluate
-metrics, predictions = evaluate_model(model, X_feat, data.targets, cv=5)
-```
-
-### Using Jupyter Notebooks
-
-Run the notebooks in order:
-1. `01_data_exploration.ipynb` - Explore and understand the data
-2. `02_preprocessing.ipynb` - Experiment with preprocessing methods
-3. `03_traditional_ml.ipynb` - Train and compare traditional ML models
-4. `04_deep_learning.ipynb` - Train deep learning models
-5. `05_final_submission.ipynb` - Generate final predictions
+---
 
 ## Preprocessing Pipeline
 
 ```
-Raw Spectrum → Baseline Correction → Smoothing → Normalization
-                    (ALS)           (Savgol)      (SNV)
+Raw Spectrum
+    → Cosmic-ray removal  (Z-score median filter, threshold=5σ)
+    → ALS baseline correction  (λ=1×10⁶, p=0.01)
+    → Savitzky-Golay smoothing  (window=11, poly=3)
+    → SNV normalization  (zero-mean, unit-variance per spectrum)
 ```
 
-### Baseline Correction (ALS)
-- Removes fluorescence background
-- Parameters: `lam` (smoothness), `p` (asymmetry)
+---
 
-### Smoothing (Savitzky-Golay)
-- Reduces noise while preserving peaks
-- Parameters: `window_length`, `polyorder`
+## CLI Reference
 
-### Normalization
-- **SNV**: Standard Normal Variate (mean=0, std=1)
-- **MinMax**: Scale to [0, 1]
-- **L2**: Unit vector normalization
+```
+python main.py --help
 
-## Models
+usage: main.py [-h] --task {classify,regress,temporal} ...
 
-### Traditional ML
-| Model | Best For |
-|-------|----------|
-| PLS | High-dimensional data, correlated features |
-| Ridge | Linear relationships, regularization needed |
-| Lasso | Feature selection, sparse solutions |
-| Random Forest | Non-linear relationships, feature importance |
+Data arguments:
+  --train PATH         Training data path (*.h5 for classify, *.csv for regress, dir/ for temporal)
+  --target STR         Regression target column name (T_rot, T_vib, ...)
 
-### Deep Learning
-| Model | Architecture |
-|-------|--------------|
-| Conv1D | 1D CNN with multiple conv layers |
-| LSTM | Bidirectional LSTM for sequential patterns |
-| Transformer | Self-attention for global dependencies |
+Model arguments:
+  --model {svm,rf,cnn,ridge,pls,ann,ann_hybrid,xgb,lstm,dtw}
+  --cv INT             Cross-validation folds (default: 5)
+  --seed INT           Random seed (default: 42)
 
-## Hyperparameter Optimization
+Temporal arguments:
+  --n_clusters INT     DTW K-means clusters (default: 4)
+  --seq_len INT        LSTM sequence length (default: 10)
+  --n_temporal_components INT  PCA components for temporal embedding (default: 20)
 
-```python
-from src.optimization import optimize_ridge, optimize_pls
-
-# Optimize Ridge with Optuna
-best_params, best_score = optimize_ridge(X, y, n_trials=100)
-
-# Optimize PLS
-best_params, best_score = optimize_pls(X, y, n_trials=50)
+Output arguments:
+  --metrics_out PATH   Metrics JSON output path
 ```
 
-## Data Format
+---
 
-Expected CSV format (LIBS contest style):
-- First N columns: Wavelengths (e.g., 200.0, 200.1, ..., 1000.0)
-- Remaining columns: Target values (e.g., Cr, Mn, Mo, Ni)
+## Performance Targets
 
-```csv
-200.0,200.1,...,1000.0,Cr,Mn,Mo,Ni
-0.123,0.456,...,0.789,1.23,0.45,0.67,0.89
-...
-```
+| Task | Metric | Target | Status |
+|------|--------|--------|--------|
+| LIBS classification (SVM) | micro_f1 | ≥ 0.90 | PASS |
+| LIBS classification (CNN) | micro_f1 | ≥ 0.90 | PASS |
+| CAP T_rot regression | RMSE | ≤ 50 K | PASS |
+| CAP T_vib regression | RMSE | ≤ 200 K | PASS |
+| BOSCH LSTM forecasting | val MSE decrease | > 0 | PASS |
+
+---
 
 ## Dependencies
 
-- numpy>=1.21
-- pandas>=1.3
-- scipy>=1.7
-- scikit-learn>=1.0
-- torch>=1.10
-- optuna>=3.0
-- matplotlib>=3.5
-- seaborn>=0.11
-- jupyter>=1.0
-- tqdm>=4.62
+| Package | Version | Purpose |
+|---------|---------|---------|
+| numpy | ≥ 1.24 | Array operations |
+| scipy | ≥ 1.11 | Signal processing, interpolation |
+| scikit-learn | ≥ 1.3 | ML models, preprocessing |
+| torch | ≥ 2.0 | CNN, LSTM deep learning |
+| h5py | ≥ 3.0 | LIBS HDF5 loading |
+| netCDF4 | ≥ 1.6 | BOSCH NetCDF loading |
+| tslearn | ≥ 0.6 | DTW K-means clustering |
+| shap | ≥ 0.40 | SHAP wavelength importance |
+| optuna | ≥ 3.0 | Hyperparameter optimisation |
+| matplotlib | ≥ 3.7 | Plotting |
+| nbformat | ≥ 5.9 | Notebook generation |
+
+---
 
 ## License
 

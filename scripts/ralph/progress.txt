@@ -540,3 +540,26 @@
   (the latter prepends the input path and creates a doubled directory path)
 - Notebook working directory = directory containing the notebook when run via nbconvert;
   use os.chdir(Path.cwd().parent) when running from notebooks/ to reach project root
+
+---
+
+## OES-020 - pytest unit tests + README install guide
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- tests/test_preprocessing.py: 7 tests for cosmic_ray_removal, align_wavelengths, Preprocessor pipeline
+- tests/test_features.py: 10 tests for detect_peaks, select_wavelengths_plasma, PlasmaDescriptorExtractor
+- tests/test_classifier.py: 8 tests for compute_ece, compute_snr_gain, evaluate_classifier
+- tests/test_temporal.py: 12 tests for compute_temporal_embedding, cluster_discharge_phases
+- README.md: completely rewritten with Prerequisites, conda/venv install,
+  data download steps (LIBS/CAP/BOSCH), quickstart for all 3 tasks,
+  notebook execution, pytest, CLI reference, performance targets table
+
+### Learnings:
+- PlasmaDescriptorExtractor.__init__() takes no wavelengths arg; wavelengths passed to fit()
+- PlasmaDescriptorExtractor.fit(X, wavelengths=wl) stores masks; transform(X) uses stored masks
+- All 37 tests pass in 3.27s using synthetic data (no dataset I/O required)
+- pytest must be installed in pytorch_env: python -m pip install pytest
+- detect_peaks() returns DataFrame, not tuple
