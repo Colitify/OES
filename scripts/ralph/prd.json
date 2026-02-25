@@ -295,7 +295,7 @@
       "id": "OES-020",
       "title": "pytest unit tests + README install guide (REP-01: reproducible in <2h)",
       "priority": 20,
-      "passes": false,
+      "passes": true,
       "notes": "REP-01 and DOC-01 requirements. Write unit tests for all new modules (preprocessing, features, classifier, temporal). Write README with step-by-step install + quickstart. Fresh-machine install from README must reproduce key figures in <2 hours.",
       "acceptanceCriteria": [
         "tests/test_preprocessing.py: tests for cosmic_ray_removal, align_wavelengths, SNR computation",
