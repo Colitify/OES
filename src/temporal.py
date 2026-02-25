@@ -205,15 +205,25 @@ def train_lstm(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # Normalise embedding to zero-mean unit-variance per feature before sliding windows
+    # (PCA scores have unequal variances: PC1 >> PC20; scaling helps LSTM convergence)
+    seq_mean = sequences.mean(axis=0, keepdims=True)
+    seq_std = sequences.std(axis=0, keepdims=True).clip(1e-6)
+    sequences_norm = ((sequences - seq_mean) / seq_std).astype(np.float32)
+
     # Build sliding-window sequences (seq_len from LSTMPredictor architecture)
     seq_len = 10
-    X_all, y_all = _build_sequences(sequences, seq_len=seq_len)
+    X_all, y_all = _build_sequences(sequences_norm, seq_len=seq_len)
 
-    # Train/val split
+    # Random train/val split to avoid distribution shift from sequential split
+    rng = np.random.default_rng(42)
+    idx = rng.permutation(len(X_all))
     n_val = max(1, int(len(X_all) * val_split))
-    n_train = len(X_all) - n_val
-    X_train, y_train = X_all[:n_train], y_all[:n_train]
-    X_val, y_val = X_all[n_train:], y_all[n_train:]
+    val_idx = idx[:n_val]
+    train_idx = idx[n_val:]
+    X_train, y_train = X_all[train_idx], y_all[train_idx]
+    X_val, y_val = X_all[val_idx], y_all[val_idx]
+    n_train = len(X_train)
 
     train_loader = DataLoader(
         TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train)),
@@ -221,7 +231,7 @@ def train_lstm(
     )
 
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     criterion = torch.nn.MSELoss()
 
     train_losses, val_losses = [], []
