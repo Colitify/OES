@@ -233,7 +233,7 @@
       "id": "OES-016",
       "title": "DTW K-means clustering for discharge phase identification (WP5)",
       "priority": 16,
-      "passes": false,
+      "passes": true,
       "notes": "Objective 2.4: characterise temporal evolution motifs. Use tslearn DTW K-means to cluster spectral time windows, identifying discharge phases (ignition, steady-state, extinction). k=3-5 clusters.",
       "acceptanceCriteria": [
         "requirements.txt: tslearn>=0.6 added",

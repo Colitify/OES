@@ -28,3 +28,6 @@ shap>=0.44
 
 # NetCDF support (OES-015: BOSCH plasma etching dataset)
 netCDF4>=1.6
+
+# DTW clustering (OES-016: discharge phase identification)
+tslearn>=0.6
