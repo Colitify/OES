@@ -507,3 +507,36 @@
 - RawDescriptionHelpFormatter preserves line breaks in description but requires
   ASCII encoding (emoji may show as ??? on Windows terminal)
 - Temporal dispatch routes before regress (temporal comes first in if-chain)
+
+---
+
+## OES-019 - Jupyter tutorial notebooks (preprocessing, classification, temporal)
+**Status**: PASSED
+**Date**: 2026-02-25
+**Branch**: ralph/plasma-oes
+
+### Changes Made:
+- Created scripts/create_notebooks.py: programmatic notebook generator using nbformat
+- notebooks/01_preprocessing.ipynb: loads LIBS (max 2 per key, ~192 samples),
+  Preprocessor (ALS+SavGol+SNV), detect_peaks → DataFrame, plots raw vs preprocessed + annotations
+- notebooks/02_classification.ipynb: SVM (rbf, C=10) 5-fold CV, confusion matrix,
+  CNN (15 epochs), SHAP LinearExplainer → PCA back-projection wavelength importance
+- notebooks/03_temporal_analysis.ipynb: BOSCH NetCDF load (3000 steps), PCA(10),
+  trajectory plot, DTW/euclidean K-means k=4, cluster membership over time
+- Outputs: 5 PNG figures in outputs/ (notebook_01_preprocessing.png,
+  notebook_02_confusion_matrix.png, notebook_02_shap_overlay.png,
+  notebook_03_pca_trajectory.png, notebook_03_clusters.png)
+
+### Learnings:
+- detect_peaks() returns a DataFrame (not a tuple); columns: wavelength_nm, intensity, prominence, fwhm_nm
+- nbconvert --to notebook --execute uses the kernel specified in notebook metadata
+  ("name" field must match a registered kernelspec)
+- pytorch_env must be registered as a Jupyter kernel:
+  /d/Develop/Anaconda/envs/pytorch_env/python.exe -m ipykernel install --user --name pytorch_env
+- shap.LinearExplainer(lsvc, X_pca) returns (n_samples, n_features, n_classes);
+  aggregate with np.abs().mean(axis=0).mean(axis=1) to get (n_features,) importance
+- Project PCA SHAP to wavelength space: np.abs(pca.components_.T @ shap_pca)
+- nbconvert output path: use --output-dir notebooks/ not --output notebooks/file.ipynb
+  (the latter prepends the input path and creates a doubled directory path)
+- Notebook working directory = directory containing the notebook when run via nbconvert;
+  use os.chdir(Path.cwd().parent) when running from notebooks/ to reach project root

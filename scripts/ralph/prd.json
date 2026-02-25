@@ -280,7 +280,7 @@
       "id": "OES-019",
       "title": "Jupyter tutorial notebooks: one per WP (preprocessing, classification, temporal)",
       "priority": 19,
-      "passes": false,
+      "passes": true,
       "notes": "WP6 documentation. Three notebooks: (1) preprocessing_tutorial.ipynb — load LIBS Benchmark, preprocess, visualise spectra + peaks. (2) classification_tutorial.ipynb — SVM/CNN training + SHAP. (3) temporal_analysis.ipynb — BOSCH loader + PCA + DTW clusters. Notebooks must run without errors.",
       "acceptanceCriteria": [
         "notebooks/01_preprocessing.ipynb: loads data/libs_benchmark/train.h5, runs PlasmaPreprocessor, plots before/after spectra with peak annotations",
