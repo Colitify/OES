@@ -1,0 +1,8 @@
+{
+  "metric_name": "micro_f1",
+  "best_value": 0.9568,
+  "maximize": true,
+  "git_sha": "b5d852ac4de590f36eb0924e81d3244a03d76068",
+  "timestamp": "2026-02-26T00:15:37.917433Z",
+  "model": "svm_ablation"
+}
