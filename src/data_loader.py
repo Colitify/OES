@@ -437,6 +437,55 @@ def load_bosch_oes(
     }
 
 
+def load_wafer_spatial(
+    path: Union[str, Path],
+    points: int = 89,
+) -> pd.DataFrame:
+    """Load wafer spatial etch-measurement CSV (89-point or 9-point layout).
+
+    Expected columns: experiment_key, lot_number, wafer_number, X, Y,
+    preox_thickness, postox_thickness, postox_thickness_nan, stepheight,
+    oxide_etch, si_etch.
+
+    Args:
+        path: Path to CSV file (e.g. Si_Oxide_etch_89_points.csv).
+        points: Expected number of measurement points per wafer (89 or 9).
+
+    Returns:
+        DataFrame with all columns, coordinates in micrometres.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Spatial CSV not found: {path}")
+    df = pd.read_csv(path)
+    required = {"experiment_key", "X", "Y"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    return df
+
+
+def parse_experiment_key(key: str) -> Tuple[str, str]:
+    """Parse experiment_key into (day_filename, wafer_group).
+
+    Example:
+        '2024-07-02_01' -> ('Day_2024_07_02.nc', 'Wafer_01')
+
+    Args:
+        key: Experiment key string in format 'YYYY-MM-DD_WW'.
+
+    Returns:
+        Tuple of (NetCDF day filename, wafer group name).
+    """
+    parts = key.rsplit("_", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid experiment_key format: '{key}'. Expected 'YYYY-MM-DD_WW'.")
+    date_str, wafer_num = parts
+    day_file = f"Day_{date_str.replace('-', '_')}.nc"
+    wafer_group = f"Wafer_{wafer_num}"
+    return day_file, wafer_group
+
+
 def load_large_csv(
     filepath: Union[str, Path],
     chunksize: int = 500,
