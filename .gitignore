@@ -24,6 +24,15 @@ notebooks/
 .env
 *.env
 
+# Node
+node_modules/
+package-lock.json
+
+# Temp / scratch files
+=0.6
+*.tmp
+*.log
+
 # OS files
 .DS_Store
 Thumbs.db
