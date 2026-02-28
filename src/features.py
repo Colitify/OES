@@ -9,53 +9,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from typing import Optional, Tuple, List, Literal, Union, Dict
 
 
-# NIST Atomic Spectra Database — strongest lines in 200–1000 nm for steel elements
-# Source: NIST ASD (https://physics.nist.gov/asd), arc/spark conditions
-# ML-017: C extended with C₂ Swan molecular band heads and CN violet system.
-#   C₂ Swan: Δv=+1 head 473.71 nm; Δv=0 head 516.52 nm; Δv=-1 head 563.59 nm
-#   CN violet: (0,0) head 388.34 nm
-#   These molecular bands form during plasma cooling and are more sensitive to
-#   low C concentrations than the weak 247.856 nm atomic line alone.
-#   (Ctvrtnickova et al. 2010; Runge et al. 2021)
-NIST_EMISSION_LINES = {
-    "C":  [247.856, 388.34, 473.71, 516.52, 563.59],
-    "Si": [212.412, 243.515, 250.690, 251.432, 252.411, 252.852, 288.158],
-    "Mn": [257.610, 259.373, 260.569, 279.482, 279.827, 280.106,
-           403.076, 403.307, 403.449],
-    "Cr": [205.552, 206.158, 267.716, 283.563, 284.325, 301.520,
-           357.869, 359.349, 360.533, 425.433, 427.480, 428.972],
-    "Mo": [202.030, 203.844, 281.615, 313.259, 315.816, 317.035,
-           319.397, 320.883, 379.825, 386.411, 390.296],
-    "Ni": [221.647, 227.021, 231.096, 232.003, 300.249,
-           341.476, 344.626, 349.296, 361.939],
-    "Cu": [213.598, 217.894, 224.261, 324.754, 327.396, 521.820],
-    "Fe": [238.204, 239.562, 240.488, 248.814, 259.939, 260.709,
-           271.442, 302.064, 358.119, 371.994, 373.487, 374.556,
-           375.824, 381.584, 382.044, 404.581, 438.355],
-}
-
-# ML-017: Per-element NIST window half-widths (nm).
-# C uses a wider window because the C₂ Swan bands are broad molecular features.
-# All other elements use ±1.0 nm (sufficient for sharp atomic lines in OES).
-NIST_DELTA_NM: Dict[str, float] = {
-    "C": 3.0,
-    "Si": 1.0,
-    "Mn": 1.0,
-    "Cr": 1.0,
-    "Mo": 1.0,
-    "Ni": 1.0,
-    "Cu": 1.0,
-    "Fe": 1.0,
-}
-
-# ML-019: Reduced Cr line set — only lines with minimal Fe-matrix interference.
-# Removes lines at 283-301 nm and 357-360 nm where dense Fe lines overlap.
-# Recommended by NIST ASD and OES literature for high-Fe matrices.
-NIST_EMISSION_LINES_CR_CLEAN: Dict[str, list] = {
-    **NIST_EMISSION_LINES,
-    "Cr": [267.716, 357.869, 425.433],
-}
-
 # OES-008: Plasma OES emission line dictionary for high-voltage electrical discharge.
 # Species: N2 molecular bands, N2+ ionic bands, atomic N/H/O, noble gas Ar.
 # Sources: NIST ASD (https://physics.nist.gov/asd), Pearse & Gaydon "Identification of
@@ -334,136 +287,6 @@ def select_wavelengths(
     return np.sort(indices)
 
 
-def select_wavelengths_sdvs(
-    X: np.ndarray,
-    y: np.ndarray,
-    n_per_element: int = 500,
-    n_bins: int = 10,
-) -> np.ndarray:
-    """Select wavelengths using SDVS (Spectral Discriminant Variable Selection).
-
-    Adapted from the SIA team (2nd place, LIBS 2022 competition) for single-
-    measurement data.  The original SDVS uses repeat measurements to estimate
-    within-class scatter; here, quantile bins over each target provide a
-    pseudo-class approximation.
-
-    For each target y_k, channels are scored by:
-        SDVS_k = Sb_k / (Sw_k + eps)
-    where Sb is the inter-class (between-bin) variance weighted by bin size,
-    and Sw is the mean within-bin variance.  The per-channel score is averaged
-    across targets.  The top-n SDVS indices are intersected with the top-n
-    correlation indices; if the intersection is too small (<50 features), the
-    union is used instead.
-
-    Args:
-        X: Spectra matrix (n_samples, n_wavelengths)
-        y: Target matrix (n_samples, n_targets) or (n_samples,)
-        n_per_element: Number of top wavelengths to keep per element
-            (before merging).
-        n_bins: Number of quantile bins used as pseudo-classes.
-
-    Returns:
-        Sorted array of selected wavelength indices.
-    """
-    if y.ndim == 1:
-        y = y.reshape(-1, 1)
-
-    n_samples, n_wavelengths = X.shape
-    n_targets = y.shape[1]
-    eps = 1e-10
-
-    sdvs_scores = np.zeros(n_wavelengths)
-    corr_scores = np.zeros(n_wavelengths)
-
-    for k in range(n_targets):
-        yk = y[:, k]
-
-        # --- SDVS via quantile bins ---
-        bin_edges = np.quantile(yk, np.linspace(0, 1, n_bins + 1))
-        bin_edges[-1] += 1e-6  # include the max value in the last bin
-        bin_ids = np.digitize(yk, bin_edges[1:-1])  # 0 … n_bins-1
-
-        overall_mean = X.mean(axis=0)
-        sb = np.zeros(n_wavelengths)
-        sw = np.zeros(n_wavelengths)
-
-        for b in range(n_bins):
-            mask = bin_ids == b
-            if mask.sum() < 2:
-                continue
-            Xb = X[mask]
-            bin_mean = Xb.mean(axis=0)
-            sb += mask.sum() * (bin_mean - overall_mean) ** 2
-            sw += Xb.var(axis=0) * mask.sum()
-
-        sb /= n_samples
-        sw /= n_samples
-        sdvs_k = sb / (sw + eps)
-        sdvs_scores += sdvs_k
-
-        # --- Correlation score ---
-        corr_scores += np.abs(_correlation_column_wise(X, yk))
-
-    sdvs_scores /= n_targets
-    corr_scores /= n_targets
-
-    # Top-n by SDVS and by correlation
-    top_sdvs = set(np.argsort(sdvs_scores)[-n_per_element:].tolist())
-    top_corr = set(np.argsort(corr_scores)[-n_per_element:].tolist())
-
-    selected = top_sdvs & top_corr
-    if len(selected) < 50:
-        selected = top_sdvs | top_corr
-
-    return np.sort(np.array(list(selected), dtype=int))
-
-
-def select_wavelengths_nist(
-    wavelengths: np.ndarray,
-    target_names=None,
-    delta_nm: Union[float, Dict[str, float]] = 1.0,
-    nist_lines: Optional[Dict[str, list]] = None,
-) -> np.ndarray:
-    """Select wavelength indices near NIST atomic emission lines.
-
-    Args:
-        wavelengths: Array of wavelength values in nm (length = n_wavelengths).
-        target_names: Element names to include (e.g. ["Mo", "C"]). None = all.
-        delta_nm: Half-window around each emission line in nm.
-            Can be a float (uniform for all elements) or a dict mapping
-            element name → window width (e.g. {"C": 3.0, "Fe": 1.0}).
-            Missing elements in a dict fall back to 1.0 nm. Default 1.0.
-        nist_lines: Optional override for the NIST emission line dict.
-            Defaults to NIST_EMISSION_LINES. Use NIST_EMISSION_LINES_CR_CLEAN
-            for reduced-interference Cr selection (ML-019).
-
-    Returns:
-        Sorted array of unique channel indices within the emission line windows.
-    """
-    if nist_lines is None:
-        nist_lines = NIST_EMISSION_LINES
-    if target_names is None:
-        target_names = list(nist_lines.keys())
-
-    selected = set()
-    for name in target_names:
-        if isinstance(delta_nm, dict):
-            elem_delta = delta_nm.get(name, 1.0)
-        else:
-            elem_delta = delta_nm
-        for line_nm in nist_lines.get(name, []):
-            mask = np.abs(wavelengths - line_nm) <= elem_delta
-            selected.update(np.where(mask)[0].tolist())
-
-    indices = np.sort(np.array(list(selected), dtype=int))
-    if len(indices) == 0:
-        raise ValueError(
-            f"No channels found within ±{delta_nm} nm of NIST lines for "
-            f"{target_names}. Check that wavelengths cover 200–1000 nm."
-        )
-    return indices
-
-
 class PlasmaDescriptorExtractor(BaseEstimator, TransformerMixin):
     """Assemble a fixed-width descriptor vector from plasma OES spectra.
 
@@ -583,7 +406,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         self,
         method: Literal["pca", "pls", "wavelength_selection", "none"] = "pca",
         n_components: int = 50,
-        selection_method: Literal["correlation", "variance", "f_score", "sdvs", "nist", "plasma_descriptor"] = "correlation",
+        selection_method: Literal["correlation", "variance", "f_score", "plasma_descriptor"] = "correlation",
         wavelengths: Optional[np.ndarray] = None,
     ):
         """Initialize feature extractor.
@@ -619,21 +442,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
             self._model.fit(X, y)
 
         elif self.method == "wavelength_selection":
-            if self.selection_method == "nist":
-                if self.wavelengths is None:
-                    raise ValueError(
-                        "wavelengths must be provided to FeatureExtractor for selection_method='nist'"
-                    )
-                self._selected_indices = select_wavelengths_nist(
-                    self.wavelengths, delta_nm=NIST_DELTA_NM
-                )
-            elif self.selection_method == "sdvs":
-                if y is None:
-                    raise ValueError("y is required for sdvs wavelength selection")
-                self._selected_indices = select_wavelengths_sdvs(
-                    X, y, n_per_element=self.n_components
-                )
-            elif self.selection_method == "plasma_descriptor":
+            if self.selection_method == "plasma_descriptor":
                 self._pde = PlasmaDescriptorExtractor()
                 self._pde.fit(X, self.wavelengths)
             else:

@@ -1,11 +1,11 @@
-"""SHAP overlay plot for Conv1DClassifier on spectral data.
+"""SHAP overlay plot for OES regression model on Mesbah CAP data.
 
-Loads a saved model checkpoint (outputs/best_model.pt), computes SHAP values
-via GradientExplainer on a subset of training spectra, and plots mean |SHAP|
-per wavelength overlaid with vertical lines at PLASMA_EMISSION_LINES positions.
+Trains an SVM regressor on the CAP dataset (T_rot), computes SHAP values
+via KernelExplainer, and plots mean |SHAP| per wavelength overlaid with
+vertical lines at PLASMA_EMISSION_LINES positions.
 
 Usage:
-    python scripts/plot_shap.py --model outputs/best_model.pt --data data/libs_benchmark/train.h5
+    python scripts/plot_shap.py --data data/mesbah_cap/dat_train.csv --target T_rot
 
 Output:
     outputs/shap_overlay.png
@@ -26,99 +26,61 @@ from src.features import PLASMA_EMISSION_LINES, PLASMA_DELTA_NM
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SHAP overlay plot for Conv1DClassifier")
-    parser.add_argument("--model", type=str, required=True,
-                        help="Path to saved model checkpoint (.pt dict)")
+    parser = argparse.ArgumentParser(description="SHAP overlay plot for OES regression")
     parser.add_argument("--data", type=str, required=True,
-                        help="Path to train.h5 or its directory")
+                        help="Path to Mesbah CAP CSV (e.g. data/mesbah_cap/dat_train.csv)")
+    parser.add_argument("--target", type=str, default="T_rot",
+                        help="Regression target (default: T_rot)")
     parser.add_argument("--n_background", type=int, default=50,
-                        help="Number of background samples for GradientExplainer (default 50)")
-    parser.add_argument("--n_explain", type=int, default=20,
-                        help="Number of samples to explain (default 20)")
+                        help="Number of background samples for KernelExplainer (default 50)")
+    parser.add_argument("--n_explain", type=int, default=30,
+                        help="Number of samples to explain (default 30)")
     parser.add_argument("--out", type=str, default=None,
                         help="Output PNG path (default: outputs/shap_overlay.png)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    import torch
-    from src.models.deep_learning import Conv1DClassifier
-    from src.evaluation import compute_shap_spectrum
-    from src.data_loader import load_libs_benchmark
-
-    # --- Load checkpoint ---
-    ckpt_path = Path(args.model)
-    if not ckpt_path.exists():
-        print(f"ERROR: Model checkpoint not found at {ckpt_path}")
-        print("Run: python main.py --task classify --model cnn --explain ... first.")
-        sys.exit(1)
-
-    ckpt = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
-    n_classes = ckpt["n_classes"]
-    n_pca = ckpt["n_pca"]
-    best_params = ckpt["best_params"]
-    pca_components = ckpt["pca_components"]    # (n_pca, n_wavelengths)
-    pca_mean = ckpt["pca_mean"]               # (n_wavelengths,)
-    scaler_mean = ckpt["scaler_mean"]         # (n_wavelengths,)
-    scaler_scale = ckpt["scaler_scale"]       # (n_wavelengths,)
-    wavelengths = ckpt.get("wavelengths", None)  # (n_wavelengths,)
-
-    # Reconstruct model
-    model = Conv1DClassifier(
-        n_classes=n_classes,
-        n_filters=best_params["n_filters"],
-        kernel_size=best_params["kernel_size"],
-        dropout=best_params["dropout"],
-        lr=best_params.get("lr", 1e-3),
-    )
-    model.load_state_dict(ckpt["model_state_dict"])
-    model.eval()
+    import shap
+    from sklearn.svm import SVR
+    from sklearn.preprocessing import StandardScaler
+    from src.data_loader import load_mesbah_cap
 
     # --- Load data ---
-    data_path = Path(args.data)
-    data_dir = str(data_path.parent) if data_path.suffix in (".h5", ".hdf5") else str(data_path)
-    print(f"Loading data from {data_dir}...")
-    X_raw, y_raw, wl = load_libs_benchmark(data_dir, split="train")
-    if wavelengths is None:
-        wavelengths = wl
-    print(f"  Loaded: X={X_raw.shape}, wavelengths={wavelengths.shape}")
+    print(f"Loading Mesbah CAP data ({args.target})...")
+    X, y, wavelengths = load_mesbah_cap(args.data, target=args.target)
+    print(f"  Loaded: X={X.shape}, y range=[{y.min():.1f}, {y.max():.1f}]")
 
-    # --- Apply preprocessing (scaler + PCA) ---
-    X_scaled = (X_raw.astype(np.float64) - scaler_mean) / scaler_scale
-    X_pca = (X_scaled - pca_mean) @ pca_components.T   # (n_samples, n_pca)
-    X_pca = X_pca.astype(np.float32)
+    # --- Train SVR model ---
+    scaler = StandardScaler()
+    X_sc = scaler.fit_transform(X)
+    svr = SVR(kernel="rbf", C=100, gamma="scale")
+    svr.fit(X_sc, y)
+    print(f"  SVR trained (R² on train: {svr.score(X_sc, y):.4f})")
 
     # --- Sample background and explain sets ---
     rng = np.random.default_rng(args.seed)
-    bg_idx = rng.choice(len(X_pca), size=min(args.n_background, len(X_pca)), replace=False)
-    exp_idx = rng.choice(len(X_pca), size=min(args.n_explain, len(X_pca)), replace=False)
+    bg_idx = rng.choice(len(X_sc), size=min(args.n_background, len(X_sc)), replace=False)
+    exp_idx = rng.choice(len(X_sc), size=min(args.n_explain, len(X_sc)), replace=False)
 
-    X_bg = X_pca[bg_idx]
-    X_exp = X_pca[exp_idx]
-    y_exp = y_raw[exp_idx]
+    X_bg = X_sc[bg_idx]
+    X_exp = X_sc[exp_idx]
 
     # --- Compute SHAP values ---
-    class _PCAProxy:
-        """Minimal PCA-like object for compute_shap_spectrum projection."""
-        def __init__(self, components, mean):
-            self.components_ = components  # (n_pca, n_wavelengths)
-
-    pca_proxy = _PCAProxy(pca_components, pca_mean)
     print(f"Computing SHAP values (background={len(X_bg)}, explain={len(X_exp)})...")
-    shap_vals = compute_shap_spectrum(model, X_bg, X_exp, wavelengths=wavelengths, pca=pca_proxy)
-    # shap_vals: (n_explain, n_wavelengths, n_classes)
-    print(f"  SHAP values shape: {shap_vals.shape}")
+    explainer = shap.KernelExplainer(svr.predict, X_bg)
+    shap_values = explainer.shap_values(X_exp, nsamples=100)
+    # shap_values: (n_explain, n_features)
+    print(f"  SHAP values shape: {shap_values.shape}")
 
-    # --- Plot mean |SHAP| per wavelength for the dominant class ---
-    mean_abs_shap_per_class = np.abs(shap_vals).mean(axis=0)  # (n_wavelengths, n_classes)
-    dominant_class = int(mean_abs_shap_per_class.max(axis=0).argmax())
-    shap_1d = mean_abs_shap_per_class[:, dominant_class]       # (n_wavelengths,)
+    # --- Plot mean |SHAP| per wavelength ---
+    mean_abs_shap = np.abs(shap_values).mean(axis=0)  # (n_features,)
 
-    fig, ax = plt.subplots(figsize=(14, 5))
-    ax.plot(wavelengths, shap_1d, color="steelblue", lw=0.6, label=f"Mean |SHAP| (class {dominant_class})")
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.bar(wavelengths, mean_abs_shap, width=(wavelengths[-1] - wavelengths[0]) / len(wavelengths),
+           color="steelblue", alpha=0.7, label=f"Mean |SHAP| ({args.target})")
 
     # Overlay PLASMA_EMISSION_LINES vertical lines
     colors = plt.cm.tab10.colors
-    species_list = list(PLASMA_EMISSION_LINES.keys())
     for si, (sp, lines) in enumerate(PLASMA_EMISSION_LINES.items()):
         col = colors[si % len(colors)]
         for li, line_nm in enumerate(lines):
@@ -127,7 +89,7 @@ def main():
 
     ax.set_xlabel("Wavelength (nm)")
     ax.set_ylabel("Mean |SHAP value|")
-    ax.set_title("SHAP Spectrum Attribution with Plasma Emission Line Overlay")
+    ax.set_title(f"SHAP Attribution for {args.target} Regression with Plasma Emission Line Overlay")
     ax.legend(loc="upper right", fontsize=7, ncol=2)
     ax.grid(True, alpha=0.2)
     plt.tight_layout()

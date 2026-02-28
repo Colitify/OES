@@ -1,5 +1,5 @@
-site_name: OES/LIBS Spectral Analysis
-site_description: Machine Learning pipeline for optical emission spectroscopy
+site_name: Plasma OES Spectral Analysis
+site_description: Machine Learning pipeline for plasma optical emission spectroscopy
 repo_url: https://github.com/your-org/libs-spectral-analysis
 
 theme:
@@ -29,12 +29,9 @@ nav:
       - Temporal Analysis: api/temporal.md
       - Evaluation: api/evaluation.md
       - Guardrail: api/guardrail.md
-      - Target Transform: api/target_transform.md
       - Models — Traditional: api/models_traditional.md
       - Models — Deep Learning: api/models_deep_learning.md
       - Models — Calibration: api/models_calibration.md
   - Model Cards:
-      - Conv1D Classifier: model_cards/conv1d_classifier.md
       - Conv1D Regressor: model_cards/conv1d_regressor.md
-      - SVM Classifier: model_cards/svm_classifier.md
       - LSTM Temporal: model_cards/lstm_temporal.md

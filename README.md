@@ -1,18 +1,19 @@
 # Plasma OES Spectral Analysis Toolkit
 
 A Python toolkit for **machine learning on plasma optical emission spectroscopy (OES)** data —
-species classification, temperature regression, and temporal evolution analysis.
+substrate classification, temperature regression, and temporal evolution analysis.
 
-**Primary dataset**: LIBS Benchmark (Figshare, 12 classes, 40 002 channels, 200–1000 nm)
-**Secondary datasets**: Mesbah Lab CAP (N₂ OES, T_rot / T_vib), BOSCH Plasma Etching (25 Hz time-series)
+> *"Apply ML techniques to analyse optical emission spectra from high voltage electrical discharge systems."*
+
+**Primary dataset**: BOSCH Plasma Etching (Zenodo, 3648 channels, 25 Hz time-series)
+**Secondary dataset**: Mesbah Lab CAP (N₂ OES, 51 channels, T_rot / T_vib)
 
 ---
 
 ## Prerequisites
 
-- **Python** 3.9 or later (3.11 recommended)
+- **Python** 3.10 or later (3.11 recommended)
 - **conda** or **pip** for package management
-- ~2 GB free disk space (datasets)
 
 ---
 
@@ -39,17 +40,6 @@ pip install -r requirements.txt
 
 ### 3 · Download datasets
 
-**LIBS Benchmark** (Figshare, CC-BY-4.0):
-
-```bash
-# Download train.h5, test.h5, test_labels.csv
-# from https://springernature.figshare.com/collections/Benchmark_classification_dataset_for_laser-induced_breakdown_spectroscopy/4768790
-# Place in: data/libs_benchmark/
-mkdir -p data/libs_benchmark
-# (manual download or use provided script):
-python data/libs_benchmark/download.py
-```
-
 **Mesbah Lab CAP** (GitHub):
 
 ```bash
@@ -75,25 +65,16 @@ python -m ipykernel install --user --name oes_env --display-name "Python (oes_en
 
 ## Quick Start
 
-### Task 1 · Species classification (LIBS Benchmark)
+### Task 1 · Substrate classification (Mesbah CAP)
 
 ```bash
-# SVM with 5-fold CV (fast baseline)
+# SVM with 5-fold CV
 python main.py \
   --task classify \
-  --train data/libs_benchmark/train.h5 \
+  --train data/mesbah_cap/dat_train.csv \
   --model svm --cv 5 --seed 42 \
   --metrics_out results/metrics.json
-
-# CNN with Optuna HPO (best performance)
-python main.py \
-  --task classify \
-  --train data/libs_benchmark/train.h5 \
-  --model cnn --cv 5 --seed 42 \
-  --metrics_out results/metrics.json
 ```
-
-Expected output: `results/metrics.json` with `primary_metric.name = "micro_f1"`.
 
 ### Task 2 · Temperature regression (Mesbah Lab CAP)
 
@@ -134,7 +115,7 @@ Run the interactive tutorial notebooks (require dataset downloads):
 # Preprocessing pipeline
 jupyter nbconvert --to notebook --execute notebooks/01_preprocessing.ipynb --output-dir notebooks/
 
-# Species classification + SHAP
+# Substrate classification
 jupyter nbconvert --to notebook --execute notebooks/02_classification.ipynb --output-dir notebooks/
 
 # Temporal analysis + DTW clustering
@@ -154,8 +135,6 @@ jupyter notebook notebooks/
 python -m pytest tests/ -v
 ```
 
-All 37 unit tests cover preprocessing, feature extraction, classification evaluation, and temporal analysis.
-
 ---
 
 ## Project Structure
@@ -163,37 +142,37 @@ All 37 unit tests cover preprocessing, feature extraction, classification evalua
 ```
 libs-spectral-analysis/
 ├── data/
-│   ├── libs_benchmark/          # LIBS Benchmark HDF5 files
 │   ├── mesbah_cap/              # Mesbah Lab CAP CSV files
 │   └── bosch_oes/               # BOSCH NetCDF files
 ├── src/
-│   ├── data_loader.py           # load_libs_benchmark, load_mesbah_cap, load_bosch_oes
+│   ├── data_loader.py           # load_mesbah_cap, load_bosch_oes, load_wafer_spatial
 │   ├── preprocessing.py         # Preprocessor (ALS, SavGol, SNV, cosmic-ray removal)
-│   ├── features.py              # detect_peaks, PlasmaDescriptorExtractor, NIST windows
+│   ├── features.py              # detect_peaks, PlasmaDescriptorExtractor, plasma emission lines
 │   ├── temporal.py              # PCA embedding, DTW clustering, LSTM predictor
+│   ├── spatial.py               # Wafer spatial uniformity, RBF interpolation
 │   ├── evaluation.py            # evaluate_classifier, compute_ece, compute_snr_gain
 │   ├── guardrail.py             # Regression guardrail for CI
+│   ├── optimization.py          # Optuna HPO for PLS, Ridge, RF, etc.
 │   └── models/
 │       ├── traditional.py       # SVM, Ridge, PLS, RF
-│       └── deep_learning.py     # Conv1DClassifier, Conv1DRegressor, train_classifier
+│       └── deep_learning.py     # Conv1DRegressor, LSTM, Transformer
 ├── notebooks/
-│   ├── 01_preprocessing.ipynb   # Preprocessing tutorial (LIBS Benchmark)
-│   ├── 02_classification.ipynb  # SVM+CNN + SHAP tutorial
+│   ├── 01_preprocessing.ipynb   # Preprocessing tutorial
+│   ├── 02_classification.ipynb  # Substrate classification demo
 │   └── 03_temporal_analysis.ipynb # PCA trajectory + DTW tutorial
 ├── scripts/
 │   ├── evaluate_cap.py          # Standalone CAP T_rot/T_vib benchmark
 │   ├── plot_temporal_pca.py     # BOSCH PCA trajectory plot
 │   ├── plot_clusters.py         # BOSCH DTW cluster plot
 │   ├── train_temporal.py        # LSTM training on BOSCH data
-│   └── create_notebooks.py      # Notebook generator (nbformat)
+│   ├── ablation.py              # Feature ablation study (OES)
+│   ├── plot_shap.py             # SHAP attribution overlay
+│   └── generate_report.py       # Final report generator
 ├── tests/
 │   ├── test_preprocessing.py    # Preprocessor unit tests
 │   ├── test_features.py         # Feature extraction unit tests
 │   ├── test_classifier.py       # Classifier evaluation unit tests
 │   └── test_temporal.py         # Temporal analysis unit tests
-├── results/
-│   ├── metrics.json             # Classification metrics (micro_f1)
-│   └── metrics_cap.json         # CAP regression metrics (RMSE)
 ├── main.py                      # Unified CLI entry point
 └── requirements.txt
 ```
@@ -220,11 +199,11 @@ python main.py --help
 usage: main.py [-h] --task {classify,regress,temporal} ...
 
 Data arguments:
-  --train PATH         Training data path (*.h5 for classify, *.csv for regress, dir/ for temporal)
+  --train PATH         Training data path (*.csv for classify/regress, dir/ for temporal)
   --target STR         Regression target column name (T_rot, T_vib, ...)
 
 Model arguments:
-  --model {svm,rf,cnn,ridge,pls,ann,ann_hybrid,xgb,lstm,dtw}
+  --model {svm,rf,ridge,pls,ann,xgb,lstm,dtw}
   --cv INT             Cross-validation folds (default: 5)
   --seed INT           Random seed (default: 42)
 
@@ -243,8 +222,6 @@ Output arguments:
 
 | Task | Metric | Target | Status |
 |------|--------|--------|--------|
-| LIBS classification (SVM) | micro_f1 | ≥ 0.90 | PASS |
-| LIBS classification (CNN) | micro_f1 | ≥ 0.90 | PASS |
 | CAP T_rot regression | RMSE | ≤ 50 K | PASS |
 | CAP T_vib regression | RMSE | ≤ 200 K | PASS |
 | BOSCH LSTM forecasting | val MSE decrease | > 0 | PASS |
@@ -255,16 +232,15 @@ Output arguments:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| numpy | ≥ 1.24 | Array operations |
-| scipy | ≥ 1.11 | Signal processing, interpolation |
-| scikit-learn | ≥ 1.3 | ML models, preprocessing |
-| torch | ≥ 2.0 | CNN, LSTM deep learning |
-| h5py | ≥ 3.0 | LIBS HDF5 loading |
+| numpy | ≥ 1.21 | Array operations |
+| scipy | ≥ 1.7 | Signal processing, interpolation |
+| scikit-learn | ≥ 1.0 | ML models, preprocessing |
+| torch | ≥ 1.10 | CNN, LSTM deep learning |
 | netCDF4 | ≥ 1.6 | BOSCH NetCDF loading |
 | tslearn | ≥ 0.6 | DTW K-means clustering |
 | shap | ≥ 0.40 | SHAP wavelength importance |
 | optuna | ≥ 3.0 | Hyperparameter optimisation |
-| matplotlib | ≥ 3.7 | Plotting |
+| matplotlib | ≥ 3.5 | Plotting |
 | nbformat | ≥ 5.9 | Notebook generation |
 
 ---

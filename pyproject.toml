@@ -5,7 +5,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 [project]
 name = "oes-spectral-analysis"
 version = "1.0.0"
-description = "Machine Learning pipeline for OES/LIBS spectral analysis"
+description = "Machine Learning pipeline for plasma OES spectral analysis"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -24,7 +24,6 @@ dependencies = [
     "shap>=0.44",
     "netCDF4>=1.6",
     "tslearn>=0.6",
-    "h5py>=3.0",
     "nbformat>=5.9",
 ]
 

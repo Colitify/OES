@@ -1,6 +1,6 @@
-"""OES/LIBS Spectral Analysis Toolkit."""
+"""OES Spectral Analysis Toolkit."""
 
-from .data_loader import SpectralDataset, load_libs_data
+from .data_loader import SpectralDataset, load_mesbah_cap, load_bosch_oes
 from .preprocessing import Preprocessor, als_baseline, preprocess_spectrum
 from .features import FeatureExtractor, extract_peaks
 from .evaluation import evaluate_model, compare_models
@@ -10,7 +10,8 @@ from .data_loader import load_wafer_spatial, parse_experiment_key
 __version__ = "1.0.0"
 __all__ = [
     "SpectralDataset",
-    "load_libs_data",
+    "load_mesbah_cap",
+    "load_bosch_oes",
     "load_wafer_spatial",
     "parse_experiment_key",
     "Preprocessor",
