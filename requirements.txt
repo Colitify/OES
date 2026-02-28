@@ -32,8 +32,5 @@ netCDF4>=1.6
 # DTW clustering (OES-016: discharge phase identification)
 tslearn>=0.6
 
-# HDF5 support (LIBS Benchmark dataset)
-h5py>=3.0
-
 # Notebook format support
 nbformat>=5.9
