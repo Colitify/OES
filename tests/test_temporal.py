@@ -88,3 +88,41 @@ class TestClusterDischargePhases:
         assert inertia_k4 <= inertia_k2, (
             f"Inertia should decrease with more clusters: k=2 {inertia_k2:.2f}, k=4 {inertia_k4:.2f}"
         )
+
+
+def test_extract_species_timeseries():
+    """Extract per-species intensity time series from spectra."""
+    from src.temporal import extract_species_timeseries
+
+    np.random.seed(42)
+    T, n_wl = 100, 500
+    wl = np.linspace(186, 884, n_wl)
+    spectra = np.random.rand(T, n_wl).astype(np.float32) * 0.1
+
+    f_idx = np.argmin(np.abs(wl - 685.6))
+    spectra[:, f_idx] = np.linspace(1, 5, T)
+
+    ts, names = extract_species_timeseries(spectra, wl)
+    assert ts.shape[0] == T
+    assert len(names) == ts.shape[1]
+    assert "F_I" in names
+
+    f_col = names.index("F_I")
+    assert ts[-1, f_col] > ts[0, f_col]
+
+
+def test_extract_species_timeseries_out_of_range():
+    """Species with lines outside wavelength range return zeros."""
+    from src.temporal import extract_species_timeseries
+
+    np.random.seed(42)
+    T, n_wl = 50, 200
+    wl = np.linspace(186, 400, n_wl)
+    spectra = np.random.rand(T, n_wl).astype(np.float32)
+
+    ts, names = extract_species_timeseries(spectra, wl, species=["F_I", "N2_2pos"])
+    f_col = names.index("F_I")
+    n2_col = names.index("N2_2pos")
+
+    assert np.allclose(ts[:, f_col], 0.0)
+    assert ts[:, n2_col].sum() > 0

@@ -203,7 +203,8 @@ def train_lstm(
     from torch.utils.data import DataLoader, TensorDataset
 
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        from src.models import get_safe_device
+        device = get_safe_device()
 
     # Normalise embedding to zero-mean unit-variance per feature before sliding windows
     # (PCA scores have unequal variances: PC1 >> PC20; scaling helps LSTM convergence)
@@ -257,3 +258,44 @@ def train_lstm(
         val_losses.append(val_loss)
 
     return {"train_loss": train_losses, "val_loss": val_losses}
+
+
+def extract_species_timeseries(
+    spectra: np.ndarray,
+    wavelengths: np.ndarray,
+    species: Optional[list] = None,
+) -> Tuple[np.ndarray, list]:
+    """Extract per-species emission intensity time series.
+
+    For each species in PLASMA_EMISSION_LINES, computes the mean intensity
+    across its emission line windows at each timestep, yielding a
+    (T, n_species) time series matrix.
+
+    Args:
+        spectra: (T, n_wavelengths) OES intensity matrix
+        wavelengths: (n_wavelengths,) wavelength array in nm
+        species: List of species keys to extract (None = all)
+
+    Returns:
+        timeseries: (T, n_species) intensity matrix
+        species_names: List of species keys (column order)
+    """
+    from src.features import PLASMA_EMISSION_LINES, PLASMA_DELTA_NM
+
+    if species is None:
+        species = list(PLASMA_EMISSION_LINES.keys())
+
+    T = spectra.shape[0]
+    ts = np.zeros((T, len(species)), dtype=np.float32)
+
+    for j, sp in enumerate(species):
+        delta = PLASMA_DELTA_NM.get(sp, 1.0)
+        lines = PLASMA_EMISSION_LINES.get(sp, [])
+        mask = np.zeros(len(wavelengths), dtype=bool)
+        for line_nm in lines:
+            mask |= np.abs(wavelengths - line_nm) <= delta
+
+        if mask.any():
+            ts[:, j] = spectra[:, mask].mean(axis=1)
+
+    return ts, species
