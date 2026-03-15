@@ -28,10 +28,11 @@ def als_baseline(
     """
     L = len(y)
     D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L - 2))
+    DDT = lam * D.dot(D.T)
     w = np.ones(L)
     for _ in range(niter):
         W = sparse.spdiags(w, 0, L, L)
-        Z = W + lam * D.dot(D.T)
+        Z = W + DDT
         z = spsolve(Z, w * y)
         w = p * (y > z) + (1 - p) * (y < z)
     return z
@@ -46,7 +47,10 @@ def snv_normalize(spectrum: np.ndarray) -> np.ndarray:
     Returns:
         SNV normalized spectrum
     """
-    return (spectrum - np.mean(spectrum)) / np.std(spectrum)
+    std = np.std(spectrum)
+    if std < 1e-10:
+        return spectrum - np.mean(spectrum)
+    return (spectrum - np.mean(spectrum)) / std
 
 
 def minmax_normalize(spectrum: np.ndarray) -> np.ndarray:
@@ -295,7 +299,3 @@ class Preprocessor(BaseEstimator, TransformerMixin):
             for i in range(X.shape[0])
         )
         return np.array(results, dtype=np.float32)
-
-    def fit_transform(self, X: np.ndarray, y=None) -> np.ndarray:
-        """Fit and transform spectra."""
-        return self.fit(X, y).transform(X)

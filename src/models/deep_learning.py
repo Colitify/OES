@@ -9,25 +9,9 @@ from tqdm import tqdm
 
 
 def _get_safe_device() -> str:
-    """Get a device that is confirmed to work with PyTorch.
-
-    Checks if CUDA is available and actually functional (can run a simple op).
-    Falls back to CPU if CUDA is available but not compatible (e.g., GPU arch mismatch).
-
-    Returns:
-        "cuda" if CUDA is available and functional, "cpu" otherwise.
-    """
-    if not torch.cuda.is_available():
-        return "cpu"
-
-    try:
-        # Try a simple CUDA operation to confirm it works
-        test_tensor = torch.zeros(1, device="cuda")
-        _ = test_tensor + 1
-        return "cuda"
-    except Exception:
-        # CUDA is installed but not functional (e.g., incompatible GPU)
-        return "cpu"
+    """Get a device confirmed to work with PyTorch. Delegates to cached shared impl."""
+    from src.models import get_safe_device
+    return get_safe_device()
 
 
 class Conv1DRegressor(nn.Module):
@@ -37,11 +21,13 @@ class Conv1DRegressor(nn.Module):
         self,
         input_dim: int,
         output_dim: int,
-        channels: List[int] = [64, 128, 256],
+        channels: List[int] = None,
         kernel_size: int = 7,
         dropout: float = 0.3
     ):
         super().__init__()
+        if channels is None:
+            channels = [64, 128, 256]
 
         # Determine appropriate pooling factor based on input dimension
         # We need output_size >= 1 after all pooling layers
@@ -236,6 +222,7 @@ def predict_with_uncertainty(
     all_preds_arr = np.stack(all_preds)   # (n_samples, n_inputs, n_outputs)
     mean_preds = all_preds_arr.mean(axis=0)
     std_preds = all_preds_arr.std(axis=0)
+    model.eval()
     return mean_preds, std_preds
 
 
@@ -345,7 +332,7 @@ def train_deep_model(
             # Early stopping
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                best_model_state = model.state_dict().copy()
+                best_model_state = {k: v.clone() for k, v in model.state_dict().items()}
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -514,11 +501,12 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         scale = 0.65 + 0.70 * torch.rand(X_batch.size(0), 1, device=X_batch.device)
         X_aug = X_batch * scale
 
-        # Wavelength masking: zero out a random contiguous block (0–50 channels)
+        # Wavelength masking: zero out a random contiguous block (0–50 channels) per sample
         n_mask = int(torch.randint(0, 51, (1,)).item())
         if n_mask > 0 and X_aug.size(1) > n_mask:
-            start = int(torch.randint(0, X_aug.size(1) - n_mask + 1, (1,)).item())
-            X_aug[:, start:start + n_mask] = 0.0
+            for i in range(X_aug.size(0)):
+                start = int(torch.randint(0, X_aug.size(1) - n_mask + 1, (1,)).item())
+                X_aug[i, start:start + n_mask] = 0.0
 
         return X_aug
 

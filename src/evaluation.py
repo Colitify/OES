@@ -370,7 +370,7 @@ def generate_report(
     report = "\n".join(lines)
 
     if save_path:
-        Path(save_path).write_text(report)
+        Path(save_path).write_text(report, encoding="utf-8")
 
     return report
 

@@ -125,7 +125,7 @@ def predict_etch_from_oes(
         Dict with: rmse, r2, model, feature_names
     """
     from sklearn.linear_model import Ridge
-    from sklearn.model_selection import cross_val_score
+    from sklearn.model_selection import cross_validate
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline
 
@@ -147,14 +147,15 @@ def predict_etch_from_oes(
     ])
 
     actual_cv = min(cv, len(X))
-    scores = cross_val_score(model, X, y, cv=actual_cv, scoring="neg_root_mean_squared_error")
-    r2_scores = cross_val_score(model, X, y, cv=actual_cv, scoring="r2")
+    cv_results = cross_validate(model, X, y, cv=actual_cv, scoring=["neg_root_mean_squared_error", "r2"])
+    rmse = float(-cv_results["test_neg_root_mean_squared_error"].mean())
+    r2 = float(cv_results["test_r2"].mean())
 
     model.fit(X, y)
 
     return {
-        "rmse": float(-scores.mean()),
-        "r2": float(r2_scores.mean()),
+        "rmse": rmse,
+        "r2": r2,
         "model": model,
         "feature_names": feat_cols,
     }
