@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-03-15T16:30:54.388234Z",
+  "git_sha": "0313f70d695224022cbce3e96f34f39a80663d79",
+  "task": "intensity",
+  "model": "ridge",
+  "primary_metric": {
+    "name": "mean_r2",
+    "value": -1.5026734630266825
+  },
+  "per_parameter": {
+    "Stat3_Etch_MV_EpdIntensity": {
+      "rmse": 2554.0130249023437,
+      "r2": -0.00768430233001709
+    },
+    "Stat3_Etch_MV_ForeLinePressure": {
+      "rmse": 5740.35361328125,
+      "r2": 0.046479535102844236
+    },
+    "Stat3_Etch_MV_Gas1Flow": {
+      "rmse": 4304.058276367187,
+      "r2": -8.230187249183654
+    },
+    "Stat3_Etch_MV_Gas2Flow": {
+      "rmse": 24.060219955444335,
+      "r2": -0.8739943146705628
+    },
+    "Stat3_Etch_MV_Gas4Flow": {
+      "rmse": 12283.4732421875,
+      "r2": -0.004007220268249512
+    },
+    "Stat3_Etch_MV_Gas5Flow": {
+      "rmse": 17614.7578125,
+      "r2": 0.05335277318954468
+    }
+  },
+  "species_used": [
+    "N2_2pos",
+    "N2p_1neg",
+    "N_I",
+    "H_alpha",
+    "H_beta",
+    "O_I",
+    "F_I",
+    "Si_I",
+    "CF2",
+    "C2_swan",
+    "SiF",
+    "CO_angstrom"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-03-15T16:31:04.525171Z",
+  "git_sha": "0313f70d695224022cbce3e96f34f39a80663d79",
+  "task": "spatiotemporal",
+  "primary_metric": {
+    "name": "attention_lstm_accuracy",
+    "value": 0.7434869739478958
+  },
+  "species_count": 13,
+  "species_names": [
+    "N2_2pos",
+    "N2p_1neg",
+    "N_I",
+    "H_alpha",
+    "H_beta",
+    "O_I",
+    "Ar_I",
+    "F_I",
+    "Si_I",
+    "CF2",
+    "C2_swan",
+    "SiF",
+    "CO_angstrom"
+  ],
+  "n_timesteps": 5000
+}
