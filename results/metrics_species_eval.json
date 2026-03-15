@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-03-15T16:08:27.738206Z",
+  "git_sha": "0313f70d695224022cbce3e96f34f39a80663d79",
+  "task": "species",
+  "model": "rf",
+  "primary_metric": {
+    "name": "f1_macro",
+    "value": 1.0
+  },
+  "metrics": {
+    "accuracy": 1.0,
+    "f1_macro": 1.0,
+    "f1_per_class": [
+      1.0
+    ]
+  },
+  "nmf_reconstruction_err": 5692573.0,
+  "species_detection_pct": {
+    "N2_2pos": 0.66,
+    "N2p_1neg": 0.2733333333333333,
+    "N_I": 0.32666666666666666,
+    "H_alpha": 0.22,
+    "H_beta": 0.21333333333333335,
+    "O_I": 0.16,
+    "Ar_I": 69.81333333333333,
+    "F_I": 68.38666666666666,
+    "Si_I": 0.4,
+    "CF2": 0.3466666666666667,
+    "C2_swan": 23.753333333333334,
+    "SiF": 0.29333333333333333,
+    "CO_angstrom": 20.76
+  }
+}
