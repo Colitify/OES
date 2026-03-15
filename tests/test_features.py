@@ -109,3 +109,19 @@ class TestPlasmaDescriptorExtractor:
         out = pde.transform(X)
         assert not np.isnan(out).any(), "Output contains NaN"
         assert not np.isinf(out).any(), "Output contains Inf"
+
+
+def test_bosch_rie_species_in_plasma_emission_lines():
+    """BOSCH RIE species must be present in PLASMA_EMISSION_LINES."""
+    from src.features import PLASMA_EMISSION_LINES, PLASMA_DELTA_NM
+
+    bosch_species = ["F_I", "Si_I", "CF2", "C2_swan", "SiF", "CO_angstrom"]
+    for sp in bosch_species:
+        assert sp in PLASMA_EMISSION_LINES, f"Missing species: {sp}"
+        assert sp in PLASMA_DELTA_NM, f"Missing delta for: {sp}"
+        assert len(PLASMA_EMISSION_LINES[sp]) >= 1, f"No lines for: {sp}"
+
+    # Verify all new species lines are within BOSCH spectrometer range (185-884 nm)
+    for sp in bosch_species:
+        for line in PLASMA_EMISSION_LINES[sp]:
+            assert 185 < line < 884, f"{sp} line {line} nm out of BOSCH range"
