@@ -251,12 +251,13 @@ def _correlation_column_wise(X: np.ndarray, y: np.ndarray) -> np.ndarray:
     X_centered = X - X.mean(axis=0)
     y_centered = y - y.mean()
 
-    # Compute covariance
-    cov = (X_centered * y_centered[:, np.newaxis]).mean(axis=0)
+    # Compute covariance (ddof=1 for consistency with np.corrcoef)
+    n = X.shape[0]
+    cov = (X_centered * y_centered[:, np.newaxis]).sum(axis=0) / (n - 1)
 
-    # Compute standard deviations
-    X_std = X_centered.std(axis=0)
-    y_std = y_centered.std()
+    # Compute standard deviations (ddof=1 for consistency with np.corrcoef)
+    X_std = X_centered.std(axis=0, ddof=1)
+    y_std = y_centered.std(ddof=1)
 
     # Avoid division by zero
     X_std[X_std == 0] = 1e-10
@@ -315,6 +316,10 @@ def select_wavelengths(
 
 class PlasmaDescriptorExtractor(BaseEstimator, TransformerMixin):
     """Assemble a fixed-width descriptor vector from plasma OES spectra.
+
+    Note: wavelengths must be passed to fit() and transform() as a keyword
+    argument. This deviates from the standard sklearn API to support
+    variable-length spectra.
 
     Three feature blocks:
     - Block A: Mean intensity in each PLASMA_EMISSION_LINES window.

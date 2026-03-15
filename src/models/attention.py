@@ -8,7 +8,7 @@ Provides:
 
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import Tuple, Optional, List
 
 
 class AttentionLSTM(nn.Module):
@@ -74,7 +74,7 @@ class SEConv1D(nn.Module):
         self,
         input_dim: int = 3648,
         n_classes: int = 3,
-        channels: list = None,
+        channels: Optional[List[int]] = None,
         se_reduction: int = 16,
     ):
         super().__init__()

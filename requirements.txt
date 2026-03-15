@@ -5,6 +5,10 @@ scipy>=1.7
 
 # Machine learning
 scikit-learn>=1.0
+# joblib is installed transitively via scikit-learn
+
+# Optional: XGBoost (used if available)
+# xgboost>=1.5
 
 # Deep learning
 torch>=1.10

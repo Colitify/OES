@@ -395,7 +395,11 @@ def predict(
 
 
 def save_model(model: nn.Module, filepath: str):
-    """Save PyTorch model."""
+    """Save PyTorch model.
+
+    Note: This function uses torch serialization. For traditional sklearn models,
+    use src.models.traditional.save_model (joblib format) instead.
+    """
     torch.save(model.state_dict(), filepath)
 
 
@@ -442,6 +446,7 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         phase_split: float = 0.33,
         augment: bool = False,
         target_names: Optional[List[str]] = None,
+        random_state: int = 42,
     ):
         self.channels = channels if channels is not None else [32, 64]
         self.kernel_size = kernel_size
@@ -456,6 +461,7 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         self.phase_split = phase_split
         self.augment = augment
         self.target_names = target_names
+        self.random_state = random_state
         self.model_ = None
         self.device_ = None
         self.input_dim_ = None
@@ -477,6 +483,7 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
             "phase_split": self.phase_split,
             "augment": self.augment,
             "target_names": self.target_names,
+            "random_state": self.random_state,
         }
 
     def set_params(self, **params):
@@ -621,7 +628,7 @@ class CNNRegressor(BaseEstimator, RegressorMixin):
         # Split for validation (10% of data)
         n_samples = X.shape[0]
         n_val = max(1, int(n_samples * 0.1))
-        indices = np.random.permutation(n_samples)
+        indices = np.random.default_rng(self.random_state).permutation(n_samples)
         train_idx, val_idx = indices[n_val:], indices[:n_val]
 
         X_train_s, X_val_s = X[train_idx], X[val_idx]

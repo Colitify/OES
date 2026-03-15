@@ -228,6 +228,7 @@ def plot_spectrum(
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
     return fig
 
@@ -255,6 +256,7 @@ def plot_spectra_comparison(
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
     return fig
 
@@ -302,6 +304,7 @@ def plot_prediction_comparison(
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
     return fig
 
@@ -329,6 +332,7 @@ def plot_model_comparison(
 
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
 
     return fig
 
