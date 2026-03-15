@@ -3,7 +3,6 @@
 import argparse
 import json
 import random
-import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -18,27 +17,18 @@ from src.models.traditional import (
     get_ensemble_model,
     get_optimized_ensemble_model,
 )
-from src.models.deep_learning import (
-    Conv1DRegressor,
-    LSTMRegressor,
-    TransformerRegressor,
-    train_deep_model,
-    predict as dl_predict,
-)
 from src.evaluation import (
     evaluate_model,
     compare_models,
     plot_prediction_comparison,
     generate_report,
 )
-import torch
 
 
-def get_git_sha() -> str | None:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-    except Exception:
-        return None
+from src.utils import get_git_sha
+
+_CAP_TARGETS = ("T_rot", "T_vib", "power", "flow", "substrate_type")
+_CAP_THRESHOLDS = {"T_rot": 50.0, "T_vib": 200.0}
 
 
 def run_classify(args) -> None:
@@ -120,7 +110,6 @@ def run_classify(args) -> None:
 
 def _is_mesbah_cap(train_path: str, target: str | None) -> bool:
     """Detect Mesbah Lab CAP dataset by path name or target column."""
-    _CAP_TARGETS = {"T_rot", "T_vib", "power", "flow", "substrate_type"}
     if target in _CAP_TARGETS:
         return True
     p = Path(train_path)
@@ -142,14 +131,9 @@ def run_cap_regress(args) -> None:
 
     from src.data_loader import load_mesbah_cap
 
-    _CAP_TARGETS = ("T_rot", "T_vib", "power", "flow", "substrate_type")
-    _TARGETS_THRESHOLDS = {"T_rot": 50.0, "T_vib": 200.0}
-
-    # Determine which targets to fit
+    # Determine which targets to fit (CAP always runs per-target)
     if args.target:
         targets = [args.target]
-    elif args.per_target:
-        targets = ["T_rot", "T_vib"]
     else:
         targets = ["T_rot", "T_vib"]
 
@@ -198,7 +182,7 @@ def run_cap_regress(args) -> None:
         rmse_std = float(scores.std())
         print(f"  {cv_folds}-fold CV RMSE: {rmse:.2f} ± {rmse_std:.2f} K")
 
-        threshold = _TARGETS_THRESHOLDS.get(target)
+        threshold = _CAP_THRESHOLDS.get(target)
         if threshold is not None:
             status = "PASS" if rmse <= threshold else "FAIL"
             print(f"  Guardrail ({target} RMSE <= {threshold} K): {status}")
@@ -208,7 +192,7 @@ def run_cap_regress(args) -> None:
     # Summary
     print("\n" + "-" * 40)
     for tgt, res in results.items():
-        threshold = _TARGETS_THRESHOLDS.get(tgt, None)
+        threshold = _CAP_THRESHOLDS.get(tgt, None)
         thr_str = f" / target <= {threshold} K" if threshold else ""
         print(f"  {tgt}: RMSE = {res['rmse']:.2f} K{thr_str}")
 
@@ -284,14 +268,105 @@ def run_temporal(args) -> None:
     print("=" * 60)
 
 
+def run_species(args) -> None:
+    """Execute species classification pipeline (--task species)."""
+    from src.data_loader import load_bosch_multi_wafer
+    from src.species import (
+        train_species_classifier,
+        detect_species_presence_batch,
+        nmf_decompose,
+        compute_species_shap,
+    )
+
+    print("=" * 60)
+    print("OES Species Classification Pipeline")
+    print(f"  Model: {args.model}  |  CV: {args.cv}")
+    print("=" * 60)
+
+    print("\n[1/5] Loading BOSCH multi-wafer data...")
+    data = load_bosch_multi_wafer(
+        args.train,
+        max_wafers=getattr(args, "max_wafers", 10),
+        max_timesteps=getattr(args, "max_timesteps", None),
+    )
+    X = data["spectra"]
+    y = data["labels"]
+    wl = data["wavelengths"]
+    print(f"  Loaded: X={X.shape}, classes={np.unique(y).tolist()}")
+
+    mask = y > 0
+    if mask.sum() > 100:
+        X_clf, y_clf = X[mask], y[mask]
+        print(f"  After removing idle: {X_clf.shape[0]} samples")
+    else:
+        X_clf, y_clf = X, y
+
+    n_nmf = getattr(args, "n_nmf_components", 5)
+    print(f"\n[2/5] NMF decomposition (k={n_nmf})...")
+    components, weights, nmf_model = nmf_decompose(X_clf, n_components=n_nmf)
+    print(f"  Reconstruction error: {nmf_model.reconstruction_err_:.2f}")
+
+    print("\n[3/5] Species presence detection...")
+    species_labels, species_names = detect_species_presence_batch(X_clf, wl)
+    for i, sp in enumerate(species_names):
+        pct = 100 * species_labels[:, i].mean()
+        print(f"  {sp}: {pct:.1f}% of spectra")
+
+    model_type = args.model if args.model in ("svm", "rf", "cnn") else "svm"
+    print(f"\n[4/5] Training {model_type.upper()} classifier ({args.cv}-fold CV)...")
+    result = train_species_classifier(X_clf, y_clf, model_type=model_type, cv=args.cv, seed=args.seed)
+    print(f"  Accuracy:  {result['accuracy']:.4f}")
+    print(f"  F1 macro:  {result['f1_macro']:.4f}")
+    print(f"  F1/class:  {result['f1_per_class']}")
+
+    if model_type in ("svm", "rf"):
+        print(f"\n[5/5] Computing SHAP feature importance...")
+        _, feat_imp = compute_species_shap(X_clf, y_clf, model_type=model_type, seed=args.seed)
+        top_k = 10
+        top_idx = np.argsort(feat_imp)[-top_k:][::-1]
+        print(f"  Top-{top_k} wavelengths (nm): {wl[top_idx].tolist()}")
+    else:
+        print("\n[5/5] SHAP skipped for CNN (use RF for interpretability)")
+
+    if args.metrics_out:
+        payload = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "git_sha": get_git_sha(),
+            "task": "species",
+            "model": model_type,
+            "primary_metric": {"name": "f1_macro", "value": result["f1_macro"]},
+            "metrics": {
+                "accuracy": result["accuracy"],
+                "f1_macro": result["f1_macro"],
+                "f1_per_class": result["f1_per_class"],
+            },
+            "nmf_reconstruction_err": float(nmf_model.reconstruction_err_),
+            "species_detection_pct": {
+                sp: float(100 * species_labels[:, i].mean())
+                for i, sp in enumerate(species_names)
+            },
+        }
+        out_path = Path(args.metrics_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"\n  Wrote metrics to {out_path}")
+
+    print("\n" + "=" * 60)
+    print("Species classification pipeline completed!")
+    print("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
             "Plasma OES Spectral Analysis Pipeline\n\n"
             "Tasks:\n"
-            "  classify  — Substrate classification on Mesbah CAP OES data (*.csv)\n"
-            "  regress   — T_rot/T_vib temperature regression on Mesbah CAP (*.csv)\n"
-            "  temporal  — Temporal clustering/forecasting on BOSCH plasma etching (dir/)\n"
+            "  classify       — Substrate classification on Mesbah CAP OES data (*.csv)\n"
+            "  regress        — T_rot/T_vib temperature regression on Mesbah CAP (*.csv)\n"
+            "  temporal       — Temporal clustering/forecasting on BOSCH plasma etching (dir/)\n"
+            "  species        — Species classification on BOSCH multi-wafer OES data (dir/)\n"
+            "  intensity      — Semi-quantitative intensity regression (dir/)\n"
+            "  spatiotemporal — Spatial etch prediction from temporal OES (dir/)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -305,7 +380,7 @@ def main():
                           help="Path to test data (same format as --train)")
     data_grp.add_argument(
         "--task", type=str, default="regress",
-        choices=["classify", "regress", "temporal"],
+        choices=["classify", "regress", "temporal", "species", "intensity", "spatiotemporal"],
         help="Task mode (default: regress)",
     )
     data_grp.add_argument("--target", type=str, default=None,
@@ -317,11 +392,13 @@ def main():
     model_grp.add_argument(
         "--model", type=str, default="ridge",
         choices=["pls", "ridge", "lasso", "rf", "svm", "xgb",
-                 "ann", "lstm", "dtw", "all"],
+                 "ann", "cnn", "lstm", "dtw", "all"],
         help="Model to train:\n"
              "  classify : svm, rf\n"
              "  regress  : ridge, pls, lasso, rf, ann, xgb\n"
              "  temporal : lstm, dtw\n"
+             "  species  : svm, rf, cnn\n"
+             "  intensity: ridge, pls, rf, ann\n"
              "(default: ridge)",
     )
     model_grp.add_argument("--optimize", action="store_true",
@@ -341,6 +418,12 @@ def main():
                                 "(default 10)")
     model_grp.add_argument("--n_temporal_components", type=int, default=20,
                            help="PCA components for BOSCH temporal embedding (default 20)")
+    model_grp.add_argument("--max_wafers", type=int, default=10,
+                            help="Max wafers to load for species/intensity tasks (default 10)")
+    model_grp.add_argument("--max_timesteps", type=int, default=None,
+                            help="Max timesteps per wafer (default None = all)")
+    model_grp.add_argument("--n_nmf_components", type=int, default=5,
+                            help="NMF components for species decomposition (default 5)")
 
     # ── Preprocessing arguments ─────────────────────────────────────────────
     pre_grp = parser.add_argument_group("Preprocessing arguments")
@@ -412,6 +495,10 @@ def main():
         parser.error(
             f"--task temporal requires --model in {{lstm, dtw}}, got '{args.model}'"
         )
+    if args.task == "species" and args.model not in ("svm", "rf", "cnn"):
+        parser.error(f"--task species requires --model in {{svm, rf, cnn}}, got '{args.model}'")
+    if args.task == "intensity" and args.model not in ("ridge", "pls", "rf", "ann"):
+        parser.error(f"--task intensity requires --model in {{ridge, pls, rf, ann}}, got '{args.model}'")
 
     # Fix randomness for reproducibility
     random.seed(args.seed)
@@ -420,6 +507,10 @@ def main():
     # Route to task-specific handler
     if args.task == "classify":
         run_classify(args)
+        return
+
+    if args.task == "species":
+        run_species(args)
         return
 
     if args.task == "temporal":
