@@ -268,6 +268,153 @@ def run_temporal(args) -> None:
     print("=" * 60)
 
 
+def run_intensity(args) -> None:
+    """Execute semi-quantitative intensity analysis (--task intensity)."""
+    from src.data_loader import load_bosch_multi_wafer
+    from src.intensity import actinometry, compute_line_ratios, oes_to_process_regression
+    from src.temporal import extract_species_timeseries
+    from src.features import PLASMA_EMISSION_LINES
+
+    print("=" * 60)
+    print("Semi-quantitative Intensity Analysis Pipeline")
+    print(f"  Model: {args.model}  |  CV: {args.cv}")
+    print("=" * 60)
+
+    print("\n[1/4] Loading BOSCH multi-wafer data...")
+    data = load_bosch_multi_wafer(
+        args.train,
+        max_wafers=getattr(args, "max_wafers", 5),
+        max_timesteps=getattr(args, "max_timesteps", None),
+    )
+    spectra = data["spectra"]
+    wl = data["wavelengths"]
+    proc = data["process_params"]
+    feat_names = data["feature_names"]
+    print(f"  Spectra: {spectra.shape}, Process params: {proc.shape}")
+
+    print("\n[2/4] Extracting species intensity time series...")
+    ts, species_names = extract_species_timeseries(spectra, wl)
+    print(f"  Extracted {len(species_names)} species: {species_names}")
+
+    print("\n[3/4] Computing actinometry ratios (ref: Ar_I)...")
+    actin_species = [s for s in species_names if s != "Ar_I"]
+    actin_matrix = np.column_stack([
+        actinometry(spectra, wl, sp, "Ar_I") for sp in actin_species
+    ])
+    print(f"  Actinometry matrix: {actin_matrix.shape}")
+
+    print(f"\n[4/4] OES → process parameter regression ({args.model})...")
+    reg_model = args.model if args.model in ("ridge", "pls", "rf", "ann") else "ridge"
+    results = {}
+    for j, pname in enumerate(feat_names[:min(8, len(feat_names))]):
+        y_proc = proc[:, j]
+        if y_proc.std() < 1e-6:
+            continue
+        res = oes_to_process_regression(actin_matrix, y_proc, model_type=reg_model, cv=args.cv)
+        results[pname] = {"rmse": res["rmse"], "r2": res["r2"]}
+        status = "OK" if res["r2"] > 0.3 else "low"
+        print(f"  {pname}: RMSE={res['rmse']:.3f}, R²={res['r2']:.3f} [{status}]")
+
+    if args.metrics_out:
+        payload = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "git_sha": get_git_sha(),
+            "task": "intensity",
+            "model": reg_model,
+            "primary_metric": {"name": "mean_r2", "value": float(np.mean([r["r2"] for r in results.values()])) if results else 0.0},
+            "per_parameter": results,
+            "species_used": actin_species,
+        }
+        out_path = Path(args.metrics_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"\n  Wrote metrics to {out_path}")
+
+    print("\n" + "=" * 60)
+    print("Intensity analysis pipeline completed!")
+    print("=" * 60)
+
+
+def run_spatiotemporal(args) -> None:
+    """Execute spatiotemporal evolution analysis (--task spatiotemporal)."""
+    from src.data_loader import load_bosch_oes, find_gas_column, label_process_phases
+    from src.temporal import extract_species_timeseries, train_attention_classifier
+    from src.temporal import compute_temporal_embedding
+
+    print("=" * 60)
+    print("Spatiotemporal Evolution Analysis Pipeline")
+    print("=" * 60)
+
+    print("\n[1/4] Loading BOSCH OES data...")
+    data = load_bosch_oes(args.train)
+    spectra = data["spectra"]
+    wl = data["wavelengths"]
+
+    max_ts = getattr(args, "max_timesteps", None)
+    if max_ts and len(spectra) > max_ts:
+        idx = np.linspace(0, len(spectra) - 1, max_ts, dtype=int)
+        spectra = spectra[idx]
+        if data["process_params"].shape[1] > 0:
+            data["process_params"] = data["process_params"][idx]
+
+    print(f"  Spectra: {spectra.shape}, {data['day_file']} / {data['wafer_key']}")
+
+    print("\n[2/4] Extracting species intensity time series...")
+    ts, species_names = extract_species_timeseries(spectra, wl)
+    print(f"  Species: {species_names}")
+    print(f"  Time series shape: {ts.shape}")
+
+    print("\n[3/4] Computing PCA embedding + training Attention-LSTM...")
+    n_comp = getattr(args, "n_temporal_components", 20)
+    embedding, pca = compute_temporal_embedding(spectra, n_components=n_comp)
+
+    proc = data["process_params"]
+    result = {"accuracy": 0.0, "attn_weights": np.zeros((1, 1))}
+    if proc.shape[1] > 0:
+        feat_names = data["process_feature_names"]
+        sf6_idx = find_gas_column(feat_names, None, ["sf6", "SF6"])
+        c4f8_idx = find_gas_column(feat_names, None, ["c4f8", "C4F8"])
+
+        if sf6_idx is not None and c4f8_idx is not None:
+            labels = label_process_phases(proc[:, sf6_idx], proc[:, c4f8_idx])
+            unique_labels = np.unique(labels)
+
+            if len(unique_labels) >= 2:
+                seq_len = getattr(args, "seq_len", 20)
+                result = train_attention_classifier(
+                    embedding, labels, seq_len=seq_len, epochs=50
+                )
+                print(f"  Attention-LSTM val accuracy: {result['accuracy']:.4f}")
+                print(f"  Attention weights shape: {result['attn_weights'].shape}")
+            else:
+                print(f"  Only {len(unique_labels)} phase(s) found — skipping Attention-LSTM")
+        else:
+            print("  Gas flow columns not found — skipping phase classification")
+    else:
+        print("  No process params — skipping phase classification")
+
+    print("\n[4/4] Spatial coupling: use --task intensity for OES → etch uniformity prediction")
+
+    if args.metrics_out:
+        payload = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "git_sha": get_git_sha(),
+            "task": "spatiotemporal",
+            "primary_metric": {"name": "attention_lstm_accuracy", "value": result["accuracy"]},
+            "species_count": len(species_names),
+            "species_names": species_names,
+            "n_timesteps": int(spectra.shape[0]),
+        }
+        out_path = Path(args.metrics_out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"\n  Wrote metrics to {out_path}")
+
+    print("\n" + "=" * 60)
+    print("Spatiotemporal analysis pipeline completed!")
+    print("=" * 60)
+
+
 def run_species(args) -> None:
     """Execute species classification pipeline (--task species)."""
     from src.data_loader import load_bosch_multi_wafer
@@ -515,6 +662,14 @@ def main():
 
     if args.task == "temporal":
         run_temporal(args)
+        return
+
+    if args.task == "intensity":
+        run_intensity(args)
+        return
+
+    if args.task == "spatiotemporal":
+        run_spatiotemporal(args)
         return
 
     if args.task == "regress":
