@@ -167,3 +167,184 @@ def detect_species_presence_batch(
             labels[i, j] = int(presence.get(sp, False))
 
     return labels, species_names
+
+
+def train_species_classifier(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_type: str = "svm",
+    cv: int = 5,
+    seed: int = 42,
+) -> Dict:
+    """Train a species/phase classifier with cross-validation.
+
+    Args:
+        X: Feature matrix (n_samples, n_features)
+        y: Integer class labels (n_samples,)
+        model_type: "svm", "rf", or "cnn"
+        cv: Number of CV folds
+        seed: Random seed
+
+    Returns:
+        Dict with keys: accuracy, f1_macro, f1_per_class, model, y_pred
+    """
+    from sklearn.model_selection import StratifiedKFold, cross_val_predict
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.svm import SVC
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import accuracy_score, f1_score
+
+    if model_type == "svm":
+        clf = Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", SVC(kernel="rbf", C=10, gamma="scale", random_state=seed)),
+        ])
+    elif model_type == "rf":
+        clf = Pipeline([
+            ("scaler", StandardScaler()),
+            ("clf", RandomForestClassifier(n_estimators=200, random_state=seed, n_jobs=-1)),
+        ])
+    elif model_type == "cnn":
+        return _train_cnn_classifier(X, y, cv=cv, seed=seed)
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+    skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=seed)
+    y_pred = cross_val_predict(clf, X, y, cv=skf)
+
+    clf.fit(X, y)
+
+    return {
+        "accuracy": float(accuracy_score(y, y_pred)),
+        "f1_macro": float(f1_score(y, y_pred, average="macro")),
+        "f1_per_class": f1_score(y, y_pred, average=None).tolist(),
+        "model": clf,
+        "y_pred": y_pred,
+    }
+
+
+def _train_cnn_classifier(
+    X: np.ndarray,
+    y: np.ndarray,
+    cv: int = 5,
+    seed: int = 42,
+    epochs: int = 50,
+    lr: float = 1e-3,
+) -> Dict:
+    """Train 1D-CNN classifier for species/phase classification."""
+    import torch
+    import torch.nn as nn
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import accuracy_score, f1_score
+    from sklearn.preprocessing import StandardScaler
+    from src.models import get_safe_device
+
+    # Define CNN locally to avoid module-level torch dependency
+    class _SimpleCNN(nn.Module):
+        def __init__(self, input_dim: int, n_classes: int):
+            super().__init__()
+            self.conv = nn.Sequential(
+                nn.Conv1d(1, 32, 7, padding=3), nn.ReLU(), nn.MaxPool1d(4),
+                nn.Conv1d(32, 64, 5, padding=2), nn.ReLU(), nn.MaxPool1d(4),
+                nn.Conv1d(64, 128, 3, padding=1), nn.ReLU(), nn.AdaptiveAvgPool1d(1),
+            )
+            self.fc = nn.Sequential(nn.Linear(128, 64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64, n_classes))
+        def forward(self, x):
+            if x.dim() == 2:
+                x = x.unsqueeze(1)
+            return self.fc(self.conv(x).squeeze(-1))
+
+    device = get_safe_device()
+    n_classes = len(np.unique(y))
+    scaler = StandardScaler()
+
+    skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=seed)
+    y_pred = np.zeros_like(y)
+
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+        X_tr = scaler.fit_transform(X[train_idx])
+        X_va = scaler.transform(X[val_idx])
+
+        X_t = torch.FloatTensor(X_tr).to(device)
+        y_t = torch.LongTensor(y[train_idx]).to(device)
+        X_v = torch.FloatTensor(X_va).to(device)
+
+        model = _SimpleCNN(X.shape[1], n_classes).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+        criterion = torch.nn.CrossEntropyLoss()
+
+        batch_size = min(512, len(X_tr))
+        model.train()
+        for _ in range(epochs):
+            perm = torch.randperm(len(X_t))
+            for start in range(0, len(X_t), batch_size):
+                batch_idx = perm[start:start+batch_size]
+                optimizer.zero_grad()
+                loss = criterion(model(X_t[batch_idx]), y_t[batch_idx])
+                loss.backward()
+                optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            preds = model(X_v).argmax(dim=1).cpu().numpy()
+        y_pred[val_idx] = preds
+
+    return {
+        "accuracy": float(accuracy_score(y, y_pred)),
+        "f1_macro": float(f1_score(y, y_pred, average="macro")),
+        "f1_per_class": f1_score(y, y_pred, average=None).tolist(),
+        "model": None,
+        "y_pred": y_pred,
+    }
+
+
+def compute_species_shap(
+    X: np.ndarray,
+    y: np.ndarray,
+    model_type: str = "rf",
+    n_background: int = 50,
+    seed: int = 42,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute SHAP feature importance for species classifier.
+
+    Args:
+        X: Feature matrix (n_samples, n_features)
+        y: Class labels (n_samples,)
+        model_type: "rf" or "svm"
+        n_background: Background samples for KernelExplainer
+        seed: Random seed
+
+    Returns:
+        shap_values: SHAP values array
+        feature_importance: Mean |SHAP| per feature (n_features,)
+    """
+    import shap
+    from sklearn.preprocessing import StandardScaler
+
+    result = train_species_classifier(X, y, model_type=model_type, cv=3, seed=seed)
+    model = result["model"]
+
+    if model_type == "rf":
+        clf = model.named_steps["clf"]
+        scaler = model.named_steps["scaler"]
+        X_scaled = scaler.transform(X)
+        explainer = shap.TreeExplainer(clf)
+        shap_values = explainer.shap_values(X_scaled)
+    else:
+        scaler = model.named_steps["scaler"]
+        X_scaled = scaler.transform(X)
+        background = shap.kmeans(X_scaled, min(n_background, len(X_scaled)))
+        explainer = shap.KernelExplainer(model.predict, background)
+        shap_values = explainer.shap_values(X_scaled[:min(100, len(X_scaled))])
+
+    # Handle shap 0.50+ 3D array and legacy list format
+    if isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
+        feature_importance = np.abs(shap_values).mean(axis=(0, 2))
+    elif isinstance(shap_values, list):
+        stacked = np.stack([np.abs(sv).mean(axis=0) for sv in shap_values])
+        feature_importance = stacked.mean(axis=0)
+    else:
+        feature_importance = np.abs(shap_values).mean(axis=0)
+
+    return shap_values, feature_importance
