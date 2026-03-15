@@ -140,3 +140,54 @@ def test_detect_species_presence_batch():
     assert labels.shape[1] == len(species_names)
     assert labels.dtype == np.int64
     assert set(np.unique(labels)).issubset({0, 1})
+
+
+def test_species_classifier_svm():
+    """SVM species classifier achieves > chance on synthetic data."""
+    from src.species import train_species_classifier
+
+    np.random.seed(42)
+    n = 300
+    n_wl = 100
+    X = np.random.randn(n, n_wl).astype(np.float32)
+    X[:100, :50] += 3.0
+    X[100:200, 50:] += 3.0
+    y = np.array([0]*100 + [1]*100 + [2]*100, dtype=np.int64)
+
+    result = train_species_classifier(X, y, model_type="svm", cv=3)
+    assert "accuracy" in result
+    assert "f1_macro" in result
+    assert result["accuracy"] > 0.7
+    assert result["model"] is not None
+
+
+def test_species_classifier_rf():
+    """RF species classifier runs without error."""
+    from src.species import train_species_classifier
+
+    np.random.seed(42)
+    n, n_wl = 150, 50
+    X = np.random.randn(n, n_wl).astype(np.float32)
+    X[:50, :25] += 2.0
+    X[50:100, 25:] += 2.0
+    y = np.array([0]*50 + [1]*50 + [2]*50, dtype=np.int64)
+
+    result = train_species_classifier(X, y, model_type="rf", cv=3)
+    assert result["accuracy"] > 0.5
+
+
+def test_compute_species_shap():
+    """SHAP values computed for RF species classifier."""
+    from src.species import compute_species_shap
+
+    np.random.seed(42)
+    n, n_wl = 100, 50
+    X = np.random.randn(n, n_wl).astype(np.float32)
+    X[:50, :25] += 3.0
+    y = np.array([0]*50 + [1]*50, dtype=np.int64)
+
+    shap_values, feature_importance = compute_species_shap(X, y, model_type="rf", n_background=20)
+
+    assert feature_importance.shape == (n_wl,)
+    assert feature_importance.sum() > 0
+    assert feature_importance[:25].mean() > feature_importance[25:].mean()
