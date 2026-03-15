@@ -27,6 +27,26 @@ PLASMA_EMISSION_LINES: Dict[str, list] = {
     "O_I":      [777.4, 844.6, 926.6],
     # Argon I (Ar I) — noble gas discharge / Paschen lines
     "Ar_I":     [696.5, 706.7, 738.4, 750.4, 763.5, 772.4],
+    # --- BOSCH RIE Process Species (SF₆/C₄F₈ etching) ---
+    # Fluorine atomic (F I) — primary etchant radical from SF₆ dissociation
+    # Source: NIST ASD (F I), Donnelly & Kornblit (2013) J. Vac. Sci. Technol. A 31, 050825
+    "F_I":      [685.6, 690.2, 703.7, 712.8, 739.9],
+    # Silicon atomic (Si I) — etch product indicator
+    # Source: NIST ASD (Si I), verified in Coburn (1982) Plasma Chem. Plasma Process.
+    "Si_I":     [243.5, 250.7, 251.6, 252.4, 288.2],
+    # CF₂ radical (A¹B₁–X¹A₁) — C₄F₈ passivation decomposition product
+    # Source: d'Agostino et al. (1981) Plasma Chem. Plasma Process. 1, 365
+    "CF2":      [251.9, 259.5],
+    # C₂ Swan bands (d³Πg–a³Πu) — carbon-containing plasma indicator
+    # Source: Pearse & Gaydon "Identification of Molecular Spectra" (5th ed.)
+    "C2_swan":  [473.7, 516.5, 563.6],
+    # SiF molecular (A²Σ+–X²Π) — etch product (Si + F recombination)
+    # Source: NIST ASD, Chung et al. (1975) J. Chem. Phys. 62, 1645
+    "SiF":      [440.0, 442.5],
+    # CO Ångström system (B¹Σ+–A¹Π) — from C₄F₈ + O₂ reaction
+    # Source: NIST ASD (CO), Herzberg "Molecular Spectra" Vol. I
+    # Note: 451.1, 519.8, 561.0 nm are the strongest B-A band heads
+    "CO_angstrom": [451.1, 519.8, 561.0],
 }
 
 # Per-species window half-widths (nm) for PLASMA_EMISSION_LINES.
@@ -39,6 +59,12 @@ PLASMA_DELTA_NM: Dict[str, float] = {
     "H_beta":   2.0,
     "O_I":      1.0,
     "Ar_I":     1.0,
+    "F_I":          1.0,
+    "Si_I":         1.0,
+    "CF2":          1.5,
+    "C2_swan":      2.0,
+    "SiF":          2.0,
+    "CO_angstrom":  1.5,
 }
 
 
@@ -476,10 +502,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         raise ValueError(f"Unknown method: {self.method}")
 
-    def fit_transform(self, X: np.ndarray, y: Optional[np.ndarray] = None) -> np.ndarray:
-        """Fit and transform spectra."""
-        return self.fit(X, y).transform(X)
-
     @property
     def explained_variance_ratio_(self) -> Optional[np.ndarray]:
         """Get explained variance ratio (PCA only)."""
@@ -506,14 +528,17 @@ class SpectralFeatures:
         Returns:
             Dictionary of statistical features
         """
+        mu = np.mean(spectrum)
+        sigma = np.std(spectrum)
+        normed = (spectrum - mu) / (sigma + 1e-10)
         return {
-            "mean": np.mean(spectrum),
-            "std": np.std(spectrum),
+            "mean": mu,
+            "std": sigma,
             "max": np.max(spectrum),
             "min": np.min(spectrum),
             "range": np.ptp(spectrum),
-            "skewness": float(np.mean(((spectrum - np.mean(spectrum)) / np.std(spectrum)) ** 3)),
-            "kurtosis": float(np.mean(((spectrum - np.mean(spectrum)) / np.std(spectrum)) ** 4) - 3),
+            "skewness": float(np.mean(normed ** 3)),
+            "kurtosis": float(np.mean(normed ** 4) - 3),
         }
 
     @staticmethod
