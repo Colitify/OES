@@ -204,7 +204,6 @@ def load_bosch_oes(
             with nc_lib.Dataset(str(proc_path)) as pds:
                 if proc_key in pds.groups:
                     pg = pds[proc_key]
-                    import warnings
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         p_times = np.array(pg["times"]).astype(np.float64)
@@ -271,8 +270,6 @@ def load_wafer_spatial(
         DataFrame with all columns, coordinates in micrometres.
     """
     path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Spatial CSV not found: {path}")
     df = pd.read_csv(path)
     required = {"experiment_key", "X", "Y"}
     missing = required - set(df.columns)
@@ -300,5 +297,141 @@ def parse_experiment_key(key: str) -> Tuple[str, str]:
     day_file = f"Day_{date_str.replace('-', '_')}.nc"
     wafer_group = f"Wafer_{wafer_num}"
     return day_file, wafer_group
+
+
+def label_process_phases(
+    sf6_flow: np.ndarray,
+    c4f8_flow: np.ndarray,
+    threshold_pct: float = 5.0,
+) -> np.ndarray:
+    """Label each timestep as etch (1), passivation (2), or idle (0).
+
+    Uses gas flow rates as proxy: SF₆ = etch gas, C₄F₈ = passivation gas.
+    When both gases flow, the dominant gas determines the phase.
+
+    Args:
+        sf6_flow: SF₆ gas flow rate array (T,)
+        c4f8_flow: C₄F₈ gas flow rate array (T,)
+        threshold_pct: Minimum flow as % of max to consider gas "active"
+
+    Returns:
+        Integer labels (T,): 0=idle, 1=etch, 2=passivation
+    """
+    sf6_max = sf6_flow.max() if sf6_flow.max() > 0 else 1.0
+    c4f8_max = c4f8_flow.max() if c4f8_flow.max() > 0 else 1.0
+
+    sf6_active = sf6_flow > (threshold_pct / 100.0 * sf6_max)
+    c4f8_active = c4f8_flow > (threshold_pct / 100.0 * c4f8_max)
+
+    labels = np.zeros(len(sf6_flow), dtype=np.int64)
+    # Etch where SF6 is active and dominant (or C4F8 inactive)
+    labels[sf6_active & ~c4f8_active] = 1
+    labels[sf6_active & c4f8_active & (sf6_flow >= c4f8_flow)] = 1
+    # Passivation where C4F8 is active and dominant
+    labels[c4f8_active & ~sf6_active] = 2
+    labels[c4f8_active & sf6_active & (c4f8_flow > sf6_flow)] = 2
+
+    return labels
+
+
+def find_gas_column(
+    feature_names: List[str],
+    explicit_name: Optional[str],
+    search_patterns: List[str],
+) -> Optional[int]:
+    """Find gas flow column index by name or pattern matching."""
+    if explicit_name:
+        try:
+            return feature_names.index(explicit_name)
+        except ValueError:
+            return None
+    for pattern in search_patterns:
+        for i, name in enumerate(feature_names):
+            if pattern.lower() in name.lower():
+                return i
+    return None
+
+
+def load_bosch_multi_wafer(
+    path: Union[str, Path],
+    max_wafers: int = 10,
+    max_timesteps: Optional[int] = None,
+    gas_sf6_col: Optional[str] = None,
+    gas_c4f8_col: Optional[str] = None,
+) -> dict:
+    """Load BOSCH OES data from multiple wafers with process phase labels.
+
+    Iterates over Day_*.nc files and wafer groups, concatenates spectra,
+    and generates process phase labels from gas flow data.
+
+    Args:
+        path: Directory containing Day_*.nc and Process_data.nc
+        max_wafers: Maximum number of wafers to load (for memory)
+        max_timesteps: If set, subsample each wafer to this many timesteps
+        gas_sf6_col: Column name for SF6 flow in process params (auto-detected if None)
+        gas_c4f8_col: Column name for C4F8 flow (auto-detected if None)
+
+    Returns:
+        dict with keys: spectra (N, 3648), wavelengths (3648,), labels (N,),
+        wafer_ids (N,), process_params (N, n_feat), feature_names list[str]
+    """
+    path = Path(path)
+    day_files = sorted(path.glob("Day_*.nc"))
+    if not day_files:
+        raise FileNotFoundError(f"No Day_*.nc in {path}")
+
+    all_spectra, all_labels, all_wafer_ids, all_params = [], [], [], []
+    wavelengths = None
+    feature_names = []
+    wafer_count = 0
+
+    for day_path in day_files:
+        if wafer_count >= max_wafers:
+            break
+
+        # Enumerate wafer groups in this day file
+        import netCDF4 as nc_lib
+        with nc_lib.Dataset(str(day_path)) as ds:
+            wafer_keys = sorted(ds.groups.keys())
+
+        for wk in wafer_keys:
+            if wafer_count >= max_wafers:
+                break
+            data = load_bosch_oes(str(path), day_file=day_path.name, wafer_key=wk)
+
+            if wavelengths is None:
+                wavelengths = data["wavelengths"]
+                feature_names = data["process_feature_names"]
+
+            spectra = data["spectra"]
+            proc = data["process_params"]
+
+            if max_timesteps and len(spectra) > max_timesteps:
+                idx = np.linspace(0, len(spectra) - 1, max_timesteps, dtype=int)
+                spectra = spectra[idx]
+                proc = proc[idx] if proc.shape[1] > 0 else proc
+
+            sf6_col_idx = find_gas_column(feature_names, gas_sf6_col, ["sf6", "SF6", "sf_6"])
+            c4f8_col_idx = find_gas_column(feature_names, gas_c4f8_col, ["c4f8", "C4F8", "c_4f_8"])
+
+            if sf6_col_idx is not None and c4f8_col_idx is not None and proc.shape[1] > 0:
+                labels = label_process_phases(proc[:, sf6_col_idx], proc[:, c4f8_col_idx])
+            else:
+                labels = np.zeros(len(spectra), dtype=np.int64)
+
+            all_spectra.append(spectra)
+            all_labels.append(labels)
+            all_wafer_ids.append(np.full(len(spectra), wafer_count, dtype=np.int64))
+            all_params.append(proc)
+            wafer_count += 1
+
+    return {
+        "spectra": np.concatenate(all_spectra),
+        "wavelengths": wavelengths,
+        "labels": np.concatenate(all_labels),
+        "wafer_ids": np.concatenate(all_wafer_ids),
+        "process_params": np.concatenate(all_params) if all_params[0].shape[1] > 0 else np.zeros((sum(len(s) for s in all_spectra), 0)),
+        "feature_names": feature_names,
+    }
 
 
