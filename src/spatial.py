@@ -103,3 +103,58 @@ def link_oes_spatial(
     uniformity = compute_wafer_uniformity(spatial_df, metric_col)
     merged = oes_features.merge(uniformity, on="experiment_key", how="inner")
     return merged
+
+
+def predict_etch_from_oes(
+    oes_features: "pd.DataFrame",
+    spatial_df: "pd.DataFrame",
+    metric_col: str,
+    cv: int = 5,
+    seed: int = 42,
+) -> dict:
+    """Predict spatial etch uniformity from OES temporal features.
+
+    Args:
+        oes_features: DataFrame with 'experiment_key' + OES feature columns
+        spatial_df: Spatial measurement DataFrame
+        metric_col: Etch metric column (e.g., 'oxide_etch')
+        cv: CV folds
+        seed: Random seed
+
+    Returns:
+        Dict with: rmse, r2, model, feature_names
+    """
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import cross_val_score
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
+
+    merged = link_oes_spatial(spatial_df, oes_features, metric_col)
+
+    exclude = {"experiment_key", "mean", "std", "min", "max", "uniformity_pct"}
+    feat_cols = [c for c in merged.columns if c not in exclude and np.issubdtype(merged[c].dtype, np.number)]
+    target_col = "uniformity_pct"
+
+    if len(merged) == 0:
+        raise ValueError("No overlapping experiment_keys between OES features and spatial data")
+
+    X = merged[feat_cols].values
+    y = merged[target_col].values
+
+    model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("ridge", Ridge(alpha=1.0)),
+    ])
+
+    actual_cv = min(cv, len(X))
+    scores = cross_val_score(model, X, y, cv=actual_cv, scoring="neg_root_mean_squared_error")
+    r2_scores = cross_val_score(model, X, y, cv=actual_cv, scoring="r2")
+
+    model.fit(X, y)
+
+    return {
+        "rmse": float(-scores.mean()),
+        "r2": float(r2_scores.mean()),
+        "model": model,
+        "feature_names": feat_cols,
+    }
