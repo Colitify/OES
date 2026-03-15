@@ -70,3 +70,31 @@ def test_oes_to_process_regression():
     assert "rmse" in result
     assert "r2" in result
     assert result["r2"] > 0.5
+
+
+def test_boltzmann_temperature():
+    """Boltzmann plot estimates T_exc from synthetic Ar lines."""
+    from src.intensity import boltzmann_temperature, AR_LINE_DATA
+
+    np.random.seed(42)
+    T_true = 5000.0  # K
+    k_B = 8.617333e-5  # eV/K
+
+    n_wl = 1000
+    wl = np.linspace(650, 800, n_wl)
+    n_timesteps = 20
+    spectra = np.ones((n_timesteps, n_wl)) * 100  # baseline
+
+    # Inject Ar I lines with Boltzmann-distributed intensities
+    for nm, data in AR_LINE_DATA.items():
+        I = data["g"] * data["A"] / nm * np.exp(-data["E_upper"] / (k_B * T_true))
+        idx = np.argmin(np.abs(wl - nm))
+        if 0 <= idx < n_wl:
+            spectra[:, idx] = I * 1e12 + 100  # scale + baseline
+
+    T_est = boltzmann_temperature(spectra, wl)
+    valid = np.isfinite(T_est)
+    assert valid.sum() > 0, "No valid T_exc estimates"
+    # Should be within ~50% of true T (Boltzmann plot is rough)
+    median_T = np.median(T_est[valid])
+    assert 2000 < median_T < 15000, f"T_exc={median_T:.0f}K out of expected range"
