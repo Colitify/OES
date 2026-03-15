@@ -352,6 +352,69 @@
         "python scripts/generate_report.py exits 0",
         "All PER-01/02 targets documented with pass/fail status in report"
       ]
+    },
+    {
+      "id": "OES-030",
+      "title": "Extended PLASMA_EMISSION_LINES for BOSCH RIE species (F, Si, CF2, C2, SiF, CO)",
+      "priority": 30,
+      "passes": true,
+      "acceptanceCriteria": "All BOSCH species present in PLASMA_EMISSION_LINES; unit test passes"
+    },
+    {
+      "id": "OES-031",
+      "title": "NMF spectral decomposition for hidden pattern extraction",
+      "priority": 31,
+      "passes": true,
+      "acceptanceCriteria": "NMF decomposes synthetic data into correct components; works on BOSCH data"
+    },
+    {
+      "id": "OES-032",
+      "title": "Automated NIST line matching + multi-label species detection",
+      "priority": 32,
+      "passes": true,
+      "acceptanceCriteria": "match_lines_to_nist matches known lines within tolerance; batch detection produces binary matrix"
+    },
+    {
+      "id": "OES-033",
+      "title": "Species/phase classifier (SVM, RF, CNN) with SHAP interpretability",
+      "priority": 33,
+      "passes": true,
+      "acceptanceCriteria": "Classifier accuracy > 70% on BOSCH process phase classification; SHAP feature importance computed"
+    },
+    {
+      "id": "OES-034",
+      "title": "Attention-LSTM for temporal phase transition prediction",
+      "priority": 34,
+      "passes": true,
+      "acceptanceCriteria": "Attention-LSTM val accuracy > 80% on BOSCH temporal data; attention weights visualizable"
+    },
+    {
+      "id": "OES-035",
+      "title": "SE-Conv1D spectral classifier with channel attention",
+      "priority": 35,
+      "passes": true,
+      "acceptanceCriteria": "SEConv1D forward pass produces correct shapes; trainable on BOSCH data"
+    },
+    {
+      "id": "OES-036",
+      "title": "Semi-quantitative intensity analysis (actinometry + line ratios)",
+      "priority": 36,
+      "passes": true,
+      "acceptanceCriteria": "Actinometry ratios computed; OES→process regression R² > 0.3 for ≥2 parameters"
+    },
+    {
+      "id": "OES-037",
+      "title": "Spatiotemporal CLI integration (--task species/intensity/spatiotemporal)",
+      "priority": 37,
+      "passes": true,
+      "acceptanceCriteria": "All three new --task modes run without error on BOSCH data; metrics JSON written"
+    },
+    {
+      "id": "OES-038",
+      "title": "OES → spatial etch uniformity prediction",
+      "priority": 38,
+      "passes": true,
+      "acceptanceCriteria": "Ridge regression from OES features to uniformity_pct; RMSE and R² reported"
     }
   ]
 }
