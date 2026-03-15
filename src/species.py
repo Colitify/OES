@@ -330,7 +330,7 @@ def compute_species_shap(
         scaler = model.named_steps["scaler"]
         X_scaled = scaler.transform(X)
         explainer = shap.TreeExplainer(clf)
-        shap_values = explainer.shap_values(X_scaled)
+        shap_values = explainer.shap_values(X_scaled, check_additivity=False)
     else:
         scaler = model.named_steps["scaler"]
         X_scaled = scaler.transform(X)

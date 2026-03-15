@@ -313,7 +313,7 @@ def run_intensity(args) -> None:
         res = oes_to_process_regression(actin_matrix, y_proc, model_type=reg_model, cv=args.cv)
         results[pname] = {"rmse": res["rmse"], "r2": res["r2"]}
         status = "OK" if res["r2"] > 0.3 else "low"
-        print(f"  {pname}: RMSE={res['rmse']:.3f}, R²={res['r2']:.3f} [{status}]")
+        print(f"  {pname}: RMSE={res['rmse']:.3f}, R2={res['r2']:.3f} [{status}]")
 
     if args.metrics_out:
         payload = {
@@ -337,7 +337,7 @@ def run_intensity(args) -> None:
 
 def run_spatiotemporal(args) -> None:
     """Execute spatiotemporal evolution analysis (--task spatiotemporal)."""
-    from src.data_loader import load_bosch_oes, find_gas_column, label_process_phases
+    from src.data_loader import load_bosch_oes, find_gas_column, label_process_phases, _detect_bosch_gas_pair
     from src.temporal import extract_species_timeseries, train_attention_classifier
     from src.temporal import compute_temporal_embedding
 
@@ -374,6 +374,10 @@ def run_spatiotemporal(args) -> None:
         feat_names = data["process_feature_names"]
         sf6_idx = find_gas_column(feat_names, None, ["sf6", "SF6"])
         c4f8_idx = find_gas_column(feat_names, None, ["c4f8", "C4F8"])
+
+        # Fallback: auto-detect from anti-correlated gas flow pairs
+        if sf6_idx is None or c4f8_idx is None:
+            sf6_idx, c4f8_idx = _detect_bosch_gas_pair(proc, feat_names)
 
         if sf6_idx is not None and c4f8_idx is not None:
             labels = label_process_phases(proc[:, sf6_idx], proc[:, c4f8_idx])

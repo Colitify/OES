@@ -352,6 +352,51 @@ def find_gas_column(
     return None
 
 
+def _detect_bosch_gas_pair(
+    proc: np.ndarray,
+    feature_names: List[str],
+) -> Tuple[Optional[int], Optional[int]]:
+    """Auto-detect etch/passivation gas columns from anti-correlated flow pairs.
+
+    In the Bosch process, SF6 (etch) and C4F8 (passivation) alternate.
+    Finds the pair of GasNFlow columns with the strongest negative correlation
+    and sufficient variability (std > 5% of max).
+
+    Returns:
+        (etch_col_idx, passivation_col_idx) or (None, None) if not found
+    """
+    gas_cols = [i for i, n in enumerate(feature_names) if "gas" in str(n).lower() and "flow" in str(n).lower()]
+    if len(gas_cols) < 2:
+        return None, None
+
+    # Filter to variable gas channels (std > 5% of max)
+    variable = [i for i in gas_cols if proc[:, i].std() > 0.05 * proc[:, i].max() and proc[:, i].max() > proc[:, i].min()]
+    if len(variable) < 2:
+        return None, None
+
+    # Find most anti-correlated pair
+    best_corr, best_pair = 0.0, (None, None)
+    for a in range(len(variable)):
+        for b in range(a + 1, len(variable)):
+            corr = np.corrcoef(proc[:, variable[a]], proc[:, variable[b]])[0, 1]
+            if corr < best_corr:
+                best_corr = corr
+                best_pair = (variable[a], variable[b])
+
+    if best_corr > -0.3:  # require meaningful anti-correlation
+        return None, None
+
+    # The channel active more often is likely C4F8 (passivation dominates in Bosch)
+    # The channel active less often is likely SF6 (etch steps are shorter)
+    i, j = best_pair
+    frac_i = (proc[:, i] > 0.1 * proc[:, i].max()).mean()
+    frac_j = (proc[:, j] > 0.1 * proc[:, j].max()).mean()
+    if frac_i < frac_j:
+        return i, j  # i=etch(SF6), j=passivation(C4F8)
+    else:
+        return j, i  # j=etch(SF6), i=passivation(C4F8)
+
+
 def load_bosch_multi_wafer(
     path: Union[str, Path],
     max_wafers: int = 10,
@@ -413,6 +458,10 @@ def load_bosch_multi_wafer(
 
             sf6_col_idx = find_gas_column(feature_names, gas_sf6_col, ["sf6", "SF6", "sf_6"])
             c4f8_col_idx = find_gas_column(feature_names, gas_c4f8_col, ["c4f8", "C4F8", "c_4f_8"])
+
+            # Fallback: auto-detect etch/passivation gases from anti-correlated flow pairs
+            if (sf6_col_idx is None or c4f8_col_idx is None) and proc.shape[1] > 0:
+                sf6_col_idx, c4f8_col_idx = _detect_bosch_gas_pair(proc, feature_names)
 
             if sf6_col_idx is not None and c4f8_col_idx is not None and proc.shape[1] > 0:
                 labels = label_process_phases(proc[:, sf6_col_idx], proc[:, c4f8_col_idx])
