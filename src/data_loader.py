@@ -334,6 +334,46 @@ def label_process_phases(
     return labels
 
 
+def label_plasma_state(
+    process_params: np.ndarray,
+    feature_names: List[str],
+    rf_threshold_pct: float = 10.0,
+) -> np.ndarray:
+    """Label each timestep by plasma state using RF power.
+
+    More robust than gas-flow labeling: RF power directly determines
+    whether the plasma is active. Gas flow labels fail when etch/passivation
+    spectra are indistinguishable (< 0.5 sigma separation).
+
+    Args:
+        process_params: (T, n_features) process data matrix
+        feature_names: Column names
+        rf_threshold_pct: Min RF power as % of max to consider plasma ON
+
+    Returns:
+        Integer labels (T,): 0=plasma_off, 1=plasma_on
+    """
+    # Find RF source power column
+    rf_col = None
+    for i, name in enumerate(feature_names):
+        if "sourcerfloadpower" in str(name).lower():
+            rf_col = i
+            break
+    if rf_col is None:
+        for i, name in enumerate(feature_names):
+            if "rfloadpower" in str(name).lower():
+                rf_col = i
+                break
+
+    if rf_col is None:
+        return np.ones(len(process_params), dtype=np.int64)  # assume all ON
+
+    rf = process_params[:, rf_col]
+    rf_max = rf.max() if rf.max() > 0 else 1.0
+    threshold = rf_threshold_pct / 100.0 * rf_max + rf.min()
+    return (rf > threshold).astype(np.int64)
+
+
 def find_gas_column(
     feature_names: List[str],
     explicit_name: Optional[str],
@@ -456,15 +496,9 @@ def load_bosch_multi_wafer(
                 spectra = spectra[idx]
                 proc = proc[idx] if proc.shape[1] > 0 else proc
 
-            sf6_col_idx = find_gas_column(feature_names, gas_sf6_col, ["sf6", "SF6", "sf_6"])
-            c4f8_col_idx = find_gas_column(feature_names, gas_c4f8_col, ["c4f8", "C4F8", "c_4f_8"])
-
-            # Fallback: auto-detect etch/passivation gases from anti-correlated flow pairs
-            if (sf6_col_idx is None or c4f8_col_idx is None) and proc.shape[1] > 0:
-                sf6_col_idx, c4f8_col_idx = _detect_bosch_gas_pair(proc, feature_names)
-
-            if sf6_col_idx is not None and c4f8_col_idx is not None and proc.shape[1] > 0:
-                labels = label_process_phases(proc[:, sf6_col_idx], proc[:, c4f8_col_idx])
+            # Primary: RF-power based labeling (plasma ON/OFF — spectrally distinguishable)
+            if proc.shape[1] > 0:
+                labels = label_plasma_state(proc, feature_names)
             else:
                 labels = np.zeros(len(spectra), dtype=np.int64)
 
