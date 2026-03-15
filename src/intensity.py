@@ -209,6 +209,11 @@ def boltzmann_temperature(
         if mask.any():
             I_matrix[:, j] = spectra[:, mask].max(axis=1)
 
+    # Subtract continuum baseline (estimated as per-spectrum minimum or
+    # median of off-line regions) to get net line intensity
+    baseline = np.median(spectra, axis=1, keepdims=True)
+    I_matrix = np.clip(I_matrix - baseline, 1.0, None)  # net intensity, floor at 1
+
     # Boltzmann plot: y = ln(I * lambda / (g * A)) vs x = E_upper
     # Slope = -1 / (k_B * T)
     with np.errstate(divide="ignore", invalid="ignore"):
