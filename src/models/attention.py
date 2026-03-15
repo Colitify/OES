@@ -128,3 +128,98 @@ class _SEBlock1D(nn.Module):
         out = self.conv(x)
         w = self.se(out).unsqueeze(-1)
         return out * w
+
+
+class SpectralTransformer(nn.Module):
+    """1D Transformer encoder for spectral classification.
+
+    Splits the spectrum into patches, projects them via linear embedding,
+    adds positional encoding, and processes with multi-head self-attention.
+
+    Inspired by ViT (Dosovitskiy 2021) adapted for 1D spectral data.
+
+    Args:
+        input_dim: Number of spectral channels
+        n_classes: Output classes
+        patch_size: Size of each spectral patch
+        d_model: Transformer embedding dimension
+        n_heads: Number of attention heads
+        n_layers: Number of Transformer encoder layers
+        dropout: Dropout rate
+    """
+
+    def __init__(
+        self,
+        input_dim: int = 3648,
+        n_classes: int = 3,
+        patch_size: int = 64,
+        d_model: int = 128,
+        n_heads: int = 4,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.patch_size = patch_size
+        n_patches = (input_dim + patch_size - 1) // patch_size  # ceil division
+        self.n_patches = n_patches
+
+        # Patch embedding: linear projection of each patch
+        self.patch_embed = nn.Linear(patch_size, d_model)
+
+        # Learnable [CLS] token and positional embeddings
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
+        self.pos_embed = nn.Parameter(torch.randn(1, n_patches + 1, d_model) * 0.02)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=n_heads,
+            dim_feedforward=d_model * 4, dropout=dropout,
+            activation="gelu", batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+
+        self.norm = nn.LayerNorm(d_model)
+        self.fc = nn.Sequential(
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, n_classes),
+        )
+        self.input_dim = input_dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (batch, input_dim) spectral input
+
+        Returns:
+            (batch, n_classes) class logits
+        """
+        B = x.shape[0]
+
+        # Pad spectrum to multiple of patch_size
+        if x.shape[1] % self.patch_size != 0:
+            pad_len = self.patch_size - (x.shape[1] % self.patch_size)
+            x = torch.nn.functional.pad(x, (0, pad_len))
+
+        # Reshape into patches: (B, n_patches, patch_size)
+        patches = x.view(B, -1, self.patch_size)
+        n_p = patches.shape[1]
+
+        # Patch embedding
+        tokens = self.patch_embed(patches)  # (B, n_patches, d_model)
+
+        # Prepend [CLS] token
+        cls = self.cls_token.expand(B, -1, -1)
+        tokens = torch.cat([cls, tokens], dim=1)  # (B, n_patches+1, d_model)
+
+        # Add positional embedding (handle variable n_patches)
+        pos = self.pos_embed[:, :n_p + 1, :]
+        tokens = tokens + pos
+
+        # Transformer encoder
+        tokens = self.transformer(tokens)
+        tokens = self.norm(tokens)
+
+        # Classification from [CLS] token
+        cls_out = tokens[:, 0]
+        return self.fc(cls_out)

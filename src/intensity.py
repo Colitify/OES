@@ -155,3 +155,81 @@ def oes_to_process_regression(
         result["feature_importances"] = model.named_steps["reg"].feature_importances_.tolist()
 
     return result
+
+
+# Known upper-state energies (eV) and statistical weights for Ar I lines
+# Source: NIST ASD (Ar I)
+AR_LINE_DATA = {
+    696.5: {"E_upper": 13.328, "g": 3, "A": 6.39e6},
+    706.7: {"E_upper": 13.302, "g": 5, "A": 3.80e6},
+    738.4: {"E_upper": 13.302, "g": 5, "A": 8.47e6},
+    750.4: {"E_upper": 13.480, "g": 1, "A": 4.45e7},
+    763.5: {"E_upper": 13.172, "g": 5, "A": 2.45e7},
+    772.4: {"E_upper": 13.153, "g": 3, "A": 1.17e7},
+}
+
+
+def boltzmann_temperature(
+    spectra: np.ndarray,
+    wavelengths: np.ndarray,
+    line_data: Optional[Dict] = None,
+    delta_nm: float = 1.0,
+) -> np.ndarray:
+    """Estimate excitation temperature from Boltzmann plot method.
+
+    Uses multiple emission lines from the same species (default: Ar I) to
+    construct a Boltzmann plot: ln(I*lambda / (g*A)) vs E_upper.
+    The slope = -1/(k_B * T_exc) gives the excitation temperature.
+
+    Args:
+        spectra: (T, n_wavelengths) OES intensity matrix
+        wavelengths: (n_wavelengths,) in nm
+        line_data: Dict mapping wavelength_nm -> {E_upper, g, A}
+        delta_nm: Window half-width for peak intensity extraction
+
+    Returns:
+        T_exc: (T,) excitation temperature in K (NaN where fit fails)
+    """
+    if line_data is None:
+        line_data = AR_LINE_DATA
+
+    k_B_eV = 8.617333e-5  # Boltzmann constant in eV/K
+    T = spectra.shape[0]
+
+    # Extract peak intensities for each line
+    lines_nm = sorted(line_data.keys())
+    E_arr = np.array([line_data[nm]["E_upper"] for nm in lines_nm])
+    g_arr = np.array([line_data[nm]["g"] for nm in lines_nm])
+    A_arr = np.array([line_data[nm]["A"] for nm in lines_nm])
+    lam_arr = np.array(lines_nm)
+
+    I_matrix = np.zeros((T, len(lines_nm)))
+    for j, nm in enumerate(lines_nm):
+        mask = np.abs(wavelengths - nm) <= delta_nm
+        if mask.any():
+            I_matrix[:, j] = spectra[:, mask].max(axis=1)
+
+    # Boltzmann plot: y = ln(I * lambda / (g * A)) vs x = E_upper
+    # Slope = -1 / (k_B * T)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        y_vals = np.log(I_matrix * lam_arr[None, :] / (g_arr[None, :] * A_arr[None, :]))
+
+    T_exc = np.full(T, np.nan)
+    valid_lines = np.isfinite(y_vals).all(axis=0) & (I_matrix.mean(axis=0) > 0)
+
+    if valid_lines.sum() >= 2:
+        x = E_arr[valid_lines]
+        Y = y_vals[:, valid_lines]
+
+        # Vectorized linear regression: slope for each timestep
+        x_mean = x.mean()
+        x_var = ((x - x_mean) ** 2).sum()
+        if x_var > 0:
+            slopes = ((Y - Y.mean(axis=1, keepdims=True)) * (x - x_mean)).sum(axis=1) / x_var
+            # T = -1 / (slope * k_B)
+            valid_slope = slopes < -1e-10  # negative slope expected
+            T_exc[valid_slope] = -1.0 / (slopes[valid_slope] * k_B_eV)
+            # Clamp to physical range
+            T_exc[(T_exc < 500) | (T_exc > 100000)] = np.nan
+
+    return T_exc

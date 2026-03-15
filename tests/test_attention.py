@@ -46,3 +46,23 @@ def test_se_conv1d_bosch_dim():
     x = torch.randn(4, 3648)
     out = model(x)
     assert out.shape == (4, 3)
+
+
+def test_spectral_transformer_forward():
+    """SpectralTransformer produces correct output shape."""
+    from src.models.attention import SpectralTransformer
+
+    model = SpectralTransformer(input_dim=200, n_classes=3, patch_size=32, d_model=64, n_heads=4, n_layers=2)
+    x = torch.randn(4, 200)
+    out = model(x)
+    assert out.shape == (4, 3)
+
+
+def test_spectral_transformer_bosch_dim():
+    """SpectralTransformer works with BOSCH 3648 channels."""
+    from src.models.attention import SpectralTransformer
+
+    model = SpectralTransformer(input_dim=3648, n_classes=2, patch_size=64, d_model=128, n_heads=4, n_layers=3)
+    x = torch.randn(2, 3648)
+    out = model(x)
+    assert out.shape == (2, 2)

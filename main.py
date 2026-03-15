@@ -315,6 +315,44 @@ def run_intensity(args) -> None:
         status = "OK" if res["r2"] > 0.3 else "low"
         print(f"  {pname}: RMSE={res['rmse']:.3f}, R2={res['r2']:.3f} [{status}]")
 
+    # --- Spatial etch prediction (if spatial data exists) ---
+    spatial_csv = Path(args.train) / "Si_Oxide_etch_89_points.csv"
+    spatial_result = None
+    if spatial_csv.exists():
+        print(f"\n[5/4] OES -> spatial etch uniformity prediction...")
+        import pandas as pd
+        from src.data_loader import load_wafer_spatial
+        from src.spatial import predict_etch_from_oes
+
+        spatial_df = load_wafer_spatial(str(spatial_csv))
+
+        # Aggregate OES features per wafer (mean intensity per species)
+        wafer_ids = data["wafer_ids"]
+        unique_wafers = np.unique(wafer_ids)
+        agg_rows = []
+        for wid in unique_wafers:
+            w_mask = wafer_ids == wid
+            row = {"experiment_key": f"wafer_{wid}"}
+            for si, sp in enumerate(actin_species):
+                row[sp] = float(actin_matrix[w_mask, si].mean())
+                row[f"{sp}_std"] = float(actin_matrix[w_mask, si].std())
+            agg_rows.append(row)
+        oes_feat_df = pd.DataFrame(agg_rows)
+
+        # Check for overlapping experiment_keys
+        spatial_keys = set(spatial_df["experiment_key"].unique())
+        oes_keys = set(oes_feat_df["experiment_key"].unique())
+        overlap = spatial_keys & oes_keys
+        if len(overlap) >= 3:
+            try:
+                sp_result = predict_etch_from_oes(oes_feat_df, spatial_df, "oxide_etch", cv=min(3, len(overlap)))
+                print(f"  Uniformity prediction: R2={sp_result['r2']:.4f}, RMSE={sp_result['rmse']:.2f}")
+                spatial_result = sp_result
+            except Exception as e:
+                print(f"  Spatial prediction failed: {e}")
+        else:
+            print(f"  Insufficient overlap ({len(overlap)} wafers, need >= 3)")
+
     if args.metrics_out:
         payload = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -325,6 +363,11 @@ def run_intensity(args) -> None:
             "per_parameter": results,
             "species_used": actin_species,
         }
+        if spatial_result is not None:
+            payload["spatial_prediction"] = {
+                "r2": spatial_result["r2"],
+                "rmse": spatial_result["rmse"],
+            }
         out_path = Path(args.metrics_out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -452,6 +495,17 @@ def run_species(args) -> None:
     else:
         X_clf, y_clf = X, y
 
+    # --- Preprocess raw spectra ---
+    print("\n[1.5/5] Preprocessing (baseline + smooth + normalize)...")
+    from src.preprocessing import Preprocessor
+    preprocessor = Preprocessor(
+        baseline="als", baseline_lam=1e5, baseline_p=0.01,
+        denoise="savgol", savgol_window=11, savgol_polyorder=3,
+        normalize="snv",
+    )
+    X_clf = preprocessor.fit_transform(X_clf)
+    print(f"  Preprocessed: {X_clf.shape}")
+
     n_nmf = getattr(args, "n_nmf_components", 5)
     print(f"\n[2/5] NMF decomposition (k={n_nmf})...")
     components, weights, nmf_model = nmf_decompose(X_clf, n_components=n_nmf)
@@ -463,7 +517,7 @@ def run_species(args) -> None:
         pct = 100 * species_labels[:, i].mean()
         print(f"  {sp}: {pct:.1f}% of spectra")
 
-    model_type = args.model if args.model in ("svm", "rf", "cnn") else "svm"
+    model_type = args.model if args.model in ("svm", "rf", "cnn", "transformer") else "svm"
     print(f"\n[4/5] Training {model_type.upper()} classifier ({args.cv}-fold CV)...")
     result = train_species_classifier(X_clf, y_clf, model_type=model_type, cv=args.cv, seed=args.seed)
     print(f"  Accuracy:  {result['accuracy']:.4f}")
@@ -477,7 +531,7 @@ def run_species(args) -> None:
         top_idx = np.argsort(feat_imp)[-top_k:][::-1]
         print(f"  Top-{top_k} wavelengths (nm): {wl[top_idx].tolist()}")
     else:
-        print("\n[5/5] SHAP skipped for CNN (use RF for interpretability)")
+        print(f"\n[5/5] SHAP skipped for {model_type.upper()} (use RF for interpretability)")
 
     if args.metrics_out:
         payload = {
@@ -543,7 +597,7 @@ def main():
     model_grp.add_argument(
         "--model", type=str, default="ridge",
         choices=["pls", "ridge", "lasso", "rf", "svm", "xgb",
-                 "ann", "cnn", "lstm", "dtw", "all"],
+                 "ann", "cnn", "lstm", "dtw", "all", "transformer"],
         help="Model to train:\n"
              "  classify : svm, rf\n"
              "  regress  : ridge, pls, lasso, rf, ann, xgb\n"
@@ -646,8 +700,8 @@ def main():
         parser.error(
             f"--task temporal requires --model in {{lstm, dtw}}, got '{args.model}'"
         )
-    if args.task == "species" and args.model not in ("svm", "rf", "cnn"):
-        parser.error(f"--task species requires --model in {{svm, rf, cnn}}, got '{args.model}'")
+    if args.task == "species" and args.model not in ("svm", "rf", "cnn", "transformer"):
+        parser.error(f"--task species requires --model in {{svm, rf, cnn, transformer}}, got '{args.model}'")
     if args.task == "intensity" and args.model not in ("ridge", "pls", "rf", "ann"):
         parser.error(f"--task intensity requires --model in {{ridge, pls, rf, ann}}, got '{args.model}'")
 

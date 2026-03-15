@@ -198,15 +198,17 @@ def train_species_classifier(
     if model_type == "svm":
         clf = Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", SVC(kernel="rbf", C=10, gamma="scale", random_state=seed)),
+            ("clf", SVC(kernel="rbf", C=10, gamma="scale", class_weight="balanced", random_state=seed)),
         ])
     elif model_type == "rf":
         clf = Pipeline([
             ("scaler", StandardScaler()),
-            ("clf", RandomForestClassifier(n_estimators=200, random_state=seed, n_jobs=-1)),
+            ("clf", RandomForestClassifier(n_estimators=200, class_weight="balanced", random_state=seed, n_jobs=-1)),
         ])
     elif model_type == "cnn":
         return _train_cnn_classifier(X, y, cv=cv, seed=seed)
+    elif model_type == "transformer":
+        return _train_transformer_classifier(X, y, cv=cv, seed=seed)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 
@@ -259,6 +261,10 @@ def _train_cnn_classifier(
     n_classes = len(np.unique(y))
     scaler = StandardScaler()
 
+    from sklearn.utils.class_weight import compute_class_weight
+    class_weights = compute_class_weight("balanced", classes=np.unique(y), y=y)
+    cw_tensor = torch.FloatTensor(class_weights).to(device)
+
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=seed)
     y_pred = np.zeros_like(y)
 
@@ -272,7 +278,7 @@ def _train_cnn_classifier(
 
         model = _SimpleCNN(X.shape[1], n_classes).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-        criterion = torch.nn.CrossEntropyLoss()
+        criterion = torch.nn.CrossEntropyLoss(weight=cw_tensor)
 
         batch_size = min(512, len(X_tr))
         model.train()
@@ -299,52 +305,159 @@ def _train_cnn_classifier(
     }
 
 
+def _train_transformer_classifier(
+    X: np.ndarray,
+    y: np.ndarray,
+    cv: int = 5,
+    seed: int = 42,
+    epochs: int = 80,
+    lr: float = 5e-4,
+) -> Dict:
+    """Train SpectralTransformer classifier."""
+    import torch
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import accuracy_score, f1_score
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.utils.class_weight import compute_class_weight
+    from src.models import get_safe_device
+    from src.models.attention import SpectralTransformer
+
+    device = get_safe_device()
+    n_classes = len(np.unique(y))
+    scaler = StandardScaler()
+
+    class_weights = compute_class_weight("balanced", classes=np.unique(y), y=y)
+    cw_tensor = torch.FloatTensor(class_weights).to(device)
+
+    skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=seed)
+    y_pred = np.zeros_like(y)
+
+    for fold, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+        X_tr = scaler.fit_transform(X[train_idx])
+        X_va = scaler.transform(X[val_idx])
+
+        X_t = torch.FloatTensor(X_tr).to(device)
+        y_t = torch.LongTensor(y[train_idx]).to(device)
+        X_v = torch.FloatTensor(X_va).to(device)
+
+        model = SpectralTransformer(
+            input_dim=X.shape[1], n_classes=n_classes,
+            patch_size=64, d_model=128, n_heads=4, n_layers=3, dropout=0.1,
+        ).to(device)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=0.01)
+        criterion = torch.nn.CrossEntropyLoss(weight=cw_tensor)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+        batch_size = min(256, len(X_tr))
+        model.train()
+        for _ in range(epochs):
+            perm = torch.randperm(len(X_t))
+            for start in range(0, len(X_t), batch_size):
+                batch_idx = perm[start:start + batch_size]
+                optimizer.zero_grad()
+                loss = criterion(model(X_t[batch_idx]), y_t[batch_idx])
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+            scheduler.step()
+
+        model.eval()
+        with torch.no_grad():
+            preds = model(X_v).argmax(dim=1).cpu().numpy()
+        y_pred[val_idx] = preds
+
+    return {
+        "accuracy": float(accuracy_score(y, y_pred)),
+        "f1_macro": float(f1_score(y, y_pred, average="macro")),
+        "f1_per_class": f1_score(y, y_pred, average=None).tolist(),
+        "model": None,
+        "y_pred": y_pred,
+    }
+
+
 def compute_species_shap(
     X: np.ndarray,
     y: np.ndarray,
     model_type: str = "rf",
     n_background: int = 50,
+    max_samples: int = 1000,
     seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Compute SHAP feature importance for species classifier.
+
+    Uses PCA(50) to reduce dimensionality when features > 100, then
+    maps SHAP values back to original feature space. Subsamples to
+    max_samples for computational tractability.
 
     Args:
         X: Feature matrix (n_samples, n_features)
         y: Class labels (n_samples,)
         model_type: "rf" or "svm"
         n_background: Background samples for KernelExplainer
+        max_samples: Maximum samples for SHAP computation
         seed: Random seed
 
     Returns:
-        shap_values: SHAP values array
-        feature_importance: Mean |SHAP| per feature (n_features,)
+        shap_values: SHAP values array (in reduced or original space)
+        feature_importance: Mean |SHAP| per original feature (n_features,)
     """
     import shap
     from sklearn.preprocessing import StandardScaler
+    from sklearn.decomposition import PCA
 
-    result = train_species_classifier(X, y, model_type=model_type, cv=3, seed=seed)
+    n_orig_features = X.shape[1]
+    use_pca = n_orig_features > 100
+
+    # Subsample for tractability
+    rng = np.random.default_rng(seed)
+    if len(X) > max_samples:
+        idx = rng.choice(len(X), max_samples, replace=False)
+        X_sub, y_sub = X[idx], y[idx]
+    else:
+        X_sub, y_sub = X, y
+
+    if use_pca:
+        scaler = StandardScaler()
+        X_sc = scaler.fit_transform(X_sub)
+        n_comp = min(50, X_sc.shape[0], X_sc.shape[1])
+        pca = PCA(n_components=n_comp, random_state=seed)
+        X_pca = pca.fit_transform(X_sc)
+        # Train classifier on PCA features
+        result = train_species_classifier(X_pca, y_sub, model_type=model_type, cv=3, seed=seed)
+    else:
+        X_pca = X_sub
+        pca = None
+        result = train_species_classifier(X_sub, y_sub, model_type=model_type, cv=3, seed=seed)
+
     model = result["model"]
 
     if model_type == "rf":
         clf = model.named_steps["clf"]
-        scaler = model.named_steps["scaler"]
-        X_scaled = scaler.transform(X)
+        model_scaler = model.named_steps["scaler"]
+        X_for_shap = model_scaler.transform(X_pca)
         explainer = shap.TreeExplainer(clf)
-        shap_values = explainer.shap_values(X_scaled, check_additivity=False)
+        shap_values = explainer.shap_values(X_for_shap, check_additivity=False)
     else:
-        scaler = model.named_steps["scaler"]
-        X_scaled = scaler.transform(X)
-        background = shap.kmeans(X_scaled, min(n_background, len(X_scaled)))
+        model_scaler = model.named_steps["scaler"]
+        X_for_shap = model_scaler.transform(X_pca)
+        background = shap.kmeans(X_for_shap, min(n_background, len(X_for_shap)))
         explainer = shap.KernelExplainer(model.predict, background)
-        shap_values = explainer.shap_values(X_scaled[:min(100, len(X_scaled))])
+        shap_values = explainer.shap_values(X_for_shap[:min(100, len(X_for_shap))])
 
-    # Handle shap 0.50+ 3D array and legacy list format
+    # Compute feature importance in PCA space
     if isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
-        feature_importance = np.abs(shap_values).mean(axis=(0, 2))
+        pca_importance = np.abs(shap_values).mean(axis=(0, 2))
     elif isinstance(shap_values, list):
         stacked = np.stack([np.abs(sv).mean(axis=0) for sv in shap_values])
-        feature_importance = stacked.mean(axis=0)
+        pca_importance = stacked.mean(axis=0)
     else:
-        feature_importance = np.abs(shap_values).mean(axis=0)
+        pca_importance = np.abs(shap_values).mean(axis=0)
+
+    # Map back to original feature space via PCA components
+    if use_pca and pca is not None:
+        # importance_orig[j] = sum_i |pca_importance[i] * pca.components_[i, j]|
+        feature_importance = np.abs(pca.components_.T @ pca_importance)
+    else:
+        feature_importance = pca_importance
 
     return shap_values, feature_importance
