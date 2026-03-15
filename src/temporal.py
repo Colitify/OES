@@ -176,6 +176,7 @@ def _build_sequences(
 def train_lstm(
     model: "LSTMPredictor",
     sequences: np.ndarray,
+    seq_len: int = 10,
     epochs: int = 100,
     lr: float = 1e-3,
     val_split: float = 0.2,
@@ -187,6 +188,7 @@ def train_lstm(
     Args:
         model: LSTMPredictor instance
         sequences: (T, n_features) temporal embedding; sliding windows built internally
+        seq_len: Sliding window length (default 10)
         epochs: Training epochs (default 100)
         lr: Learning rate (default 1e-3)
         val_split: Fraction of sequences reserved for validation (default 0.2)
@@ -212,8 +214,7 @@ def train_lstm(
     seq_std = sequences.std(axis=0, keepdims=True).clip(1e-6)
     sequences_norm = ((sequences - seq_mean) / seq_std).astype(np.float32)
 
-    # Build sliding-window sequences (seq_len from LSTMPredictor architecture)
-    seq_len = 10
+    # Build sliding-window sequences
     X_all, y_all = _build_sequences(sequences_norm, seq_len=seq_len)
 
     # Random train/val split to avoid distribution shift from sequential split

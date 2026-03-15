@@ -85,7 +85,7 @@ def run_classify(args) -> None:
     # --- Write metrics.json ---
     if args.metrics_out:
         payload = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
             "git_sha": get_git_sha(),
             "model": args.model,
             "task": "classify",
@@ -355,7 +355,7 @@ def run_intensity(args) -> None:
 
     if args.metrics_out:
         payload = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
             "git_sha": get_git_sha(),
             "task": "intensity",
             "model": reg_model,
@@ -444,7 +444,7 @@ def run_spatiotemporal(args) -> None:
 
     if args.metrics_out:
         payload = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
             "git_sha": get_git_sha(),
             "task": "spatiotemporal",
             "primary_metric": {"name": "attention_lstm_accuracy", "value": result["accuracy"]},
@@ -535,7 +535,7 @@ def run_species(args) -> None:
 
     if args.metrics_out:
         payload = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(datetime.timezone.utc).isoformat(),
             "git_sha": get_git_sha(),
             "task": "species",
             "model": model_type,
