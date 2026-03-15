@@ -126,3 +126,24 @@ def test_extract_species_timeseries_out_of_range():
 
     assert np.allclose(ts[:, f_col], 0.0)
     assert ts[:, n2_col].sum() > 0
+
+
+def test_train_attention_lstm_classifier():
+    """Attention-LSTM trains on synthetic phase transition data."""
+    from src.temporal import train_attention_classifier
+
+    np.random.seed(42)
+    T, n_feat = 200, 10
+    seq_len = 20
+
+    embedding = np.random.randn(T, n_feat).astype(np.float32)
+    embedding[:100, :5] += 2.0
+    embedding[100:, 5:] += 2.0
+    labels = np.array([0]*100 + [1]*100, dtype=np.int64)
+
+    result = train_attention_classifier(
+        embedding, labels, seq_len=seq_len, epochs=20, lr=1e-3
+    )
+    assert "accuracy" in result
+    assert "attn_weights" in result
+    assert result["accuracy"] > 0.6

@@ -299,3 +299,83 @@ def extract_species_timeseries(
             ts[:, j] = spectra[:, mask].mean(axis=1)
 
     return ts, species
+
+
+def train_attention_classifier(
+    embedding: np.ndarray,
+    labels: np.ndarray,
+    seq_len: int = 20,
+    hidden_size: int = 64,
+    epochs: int = 50,
+    lr: float = 1e-3,
+    val_split: float = 0.2,
+    device: Optional[str] = None,
+) -> dict:
+    """Train Attention-LSTM for temporal phase classification.
+
+    Args:
+        embedding: (T, n_features) temporal embedding
+        labels: (T,) integer phase labels
+        seq_len: Window length for sliding sequences
+        hidden_size: LSTM hidden size
+        epochs: Training epochs
+        lr: Learning rate
+        val_split: Validation fraction
+        device: 'cuda', 'cpu', or None (auto)
+
+    Returns:
+        dict with: accuracy, attn_weights (n_seqs, seq_len), model
+    """
+    import torch
+    from src.models.attention import AttentionLSTM
+    from src.models import get_safe_device
+    from sklearn.metrics import accuracy_score
+
+    if device is None:
+        device = get_safe_device()
+
+    n_classes = len(np.unique(labels))
+    T = len(embedding)
+
+    n_seqs = T - seq_len
+    X_all = np.stack([embedding[i:i+seq_len] for i in range(n_seqs)]).astype(np.float32)
+    y_all = labels[seq_len:].astype(np.int64)
+
+    rng = np.random.default_rng(42)
+    idx = rng.permutation(n_seqs)
+    n_val = max(1, int(n_seqs * val_split))
+    val_idx, train_idx = idx[:n_val], idx[n_val:]
+
+    X_tr = torch.FloatTensor(X_all[train_idx]).to(device)
+    y_tr = torch.LongTensor(y_all[train_idx]).to(device)
+    X_va = torch.FloatTensor(X_all[val_idx]).to(device)
+
+    model = AttentionLSTM(
+        n_features=embedding.shape[1], hidden_size=hidden_size,
+        n_classes=n_classes, n_layers=2,
+    ).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    for epoch in range(epochs):
+        model.train()
+        optimizer.zero_grad()
+        out, _ = model(X_tr)
+        loss = criterion(out, y_tr)
+        loss.backward()
+        optimizer.step()
+
+    model.eval()
+    with torch.no_grad():
+        out_va, attn_va = model(X_va)
+        preds = out_va.argmax(dim=1).cpu().numpy()
+        acc = float(accuracy_score(y_all[val_idx], preds))
+
+        out_all, attn_all = model(torch.FloatTensor(X_all).to(device))
+        attn_np = attn_all.cpu().numpy()
+
+    return {
+        "accuracy": acc,
+        "attn_weights": attn_np,
+        "model": model,
+    }
