@@ -20,14 +20,9 @@ except ImportError:
 
 
 def _cuda_ok() -> bool:
-    """Check if CUDA is available and functional."""
-    try:
-        import torch
-        t = torch.zeros(1, device="cuda")
-        _ = t + 1
-        return True
-    except Exception:
-        return False
+    """Check if CUDA is available and functional. Delegates to cached shared impl."""
+    from src.models import get_safe_device
+    return get_safe_device() == "cuda"
 
 
 def get_traditional_models(
@@ -215,6 +210,9 @@ def train_traditional_model(
 def save_model(model, filepath: str):
     """Save trained model to file.
 
+    Note: This function uses joblib serialization. For deep learning models,
+    use src.models.deep_learning.save_model (torch format) instead.
+
     Args:
         model: Trained model
         filepath: Path to save
@@ -253,8 +251,6 @@ def get_ensemble_model(
     Returns:
         Ensemble model (StackingRegressor or VotingRegressor)
     """
-    from sklearn.ensemble import StackingRegressor, VotingRegressor
-
     if base_models is None:
         base_models = ["pls", "ridge", "rf"]
 
@@ -275,34 +271,30 @@ def get_ensemble_model(
     if not estimators:
         raise ValueError("No valid base models specified for ensemble")
 
-    if ensemble_method == "stacking":
-        # StackingRegressor with Ridge as final estimator
-        # For multi-output, use MultiOutputRegressor wrapper
-        from sklearn.multioutput import MultiOutputRegressor
+    return _assemble_ensemble(estimators, ensemble_method, n_targets,
+                              final_alpha=final_estimator_alpha)
 
+
+def _assemble_ensemble(estimators, ensemble_method, n_targets, final_alpha=1.0):
+    """Build a StackingRegressor or VotingRegressor, wrapped in MultiOutputRegressor if needed."""
+    from sklearn.ensemble import StackingRegressor, VotingRegressor
+
+    if ensemble_method == "stacking":
         base_ensemble = StackingRegressor(
             estimators=estimators,
-            final_estimator=Ridge(alpha=final_estimator_alpha),
+            final_estimator=Ridge(alpha=final_alpha),
             cv=5,
             n_jobs=-1,
         )
-
-        if n_targets > 1:
-            return MultiOutputRegressor(base_ensemble)
-        return base_ensemble
-
-    else:  # voting
-        # VotingRegressor averages predictions
-        from sklearn.multioutput import MultiOutputRegressor
-
+    else:
         base_ensemble = VotingRegressor(
             estimators=estimators,
             n_jobs=-1,
         )
 
-        if n_targets > 1:
-            return MultiOutputRegressor(base_ensemble)
-        return base_ensemble
+    if n_targets > 1:
+        return MultiOutputRegressor(base_ensemble)
+    return base_ensemble
 
 
 def get_optimized_ensemble_model(
@@ -330,7 +322,6 @@ def get_optimized_ensemble_model(
     Returns:
         Tuple of (ensemble_model, best_params_dict, best_ensemble_score)
     """
-    from sklearn.ensemble import StackingRegressor, VotingRegressor
     from sklearn.model_selection import cross_val_score
     import warnings
 
@@ -390,33 +381,7 @@ def get_optimized_ensemble_model(
         raise ValueError("No valid base models for ensemble")
 
     # Create ensemble
-    if ensemble_method == "stacking":
-        from sklearn.multioutput import MultiOutputRegressor
-
-        base_ensemble = StackingRegressor(
-            estimators=estimators,
-            final_estimator=Ridge(alpha=1.0),
-            cv=5,
-            n_jobs=-1,
-        )
-
-        if n_targets > 1:
-            ensemble = MultiOutputRegressor(base_ensemble)
-        else:
-            ensemble = base_ensemble
-
-    else:  # voting
-        from sklearn.multioutput import MultiOutputRegressor
-
-        base_ensemble = VotingRegressor(
-            estimators=estimators,
-            n_jobs=-1,
-        )
-
-        if n_targets > 1:
-            ensemble = MultiOutputRegressor(base_ensemble)
-        else:
-            ensemble = base_ensemble
+    ensemble = _assemble_ensemble(estimators, ensemble_method, n_targets)
 
     # Evaluate ensemble
     print(f"    Evaluating {ensemble_method} ensemble...")

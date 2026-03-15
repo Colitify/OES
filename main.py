@@ -731,7 +731,11 @@ def main():
         return
 
     if args.task == "regress":
-        run_cap_regress(args)
+        if _is_mesbah_cap(args.train, args.target):
+            run_cap_regress(args)
+        else:
+            parser.error(f"--task regress currently only supports Mesbah CAP data. "
+                         f"Got: {args.train}")
         return
 
 

@@ -314,6 +314,9 @@ def train_attention_classifier(
 ) -> dict:
     """Train Attention-LSTM for temporal phase classification.
 
+    Note: Trains on full training set per epoch (no mini-batching).
+    Suitable for datasets < 50,000 sequences.
+
     Args:
         embedding: (T, n_features) temporal embedding
         labels: (T,) integer phase labels

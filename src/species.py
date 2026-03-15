@@ -145,7 +145,7 @@ def detect_species_presence_batch(
     wavelengths: np.ndarray,
     threshold_sigma: float = 3.0,
 ) -> Tuple[np.ndarray, List[str]]:
-    """Detect species presence across a batch of spectra.
+    """Detect species presence across a batch of spectra (vectorized).
 
     Args:
         X: Spectra matrix (n_samples, n_wavelengths)
@@ -156,15 +156,26 @@ def detect_species_presence_batch(
         labels: Binary matrix (n_samples, n_species), 1=present
         species_names: List of species names (column order)
     """
-    from src.features import PLASMA_EMISSION_LINES
+    from src.features import PLASMA_EMISSION_LINES, PLASMA_DELTA_NM
 
     species_names = list(PLASMA_EMISSION_LINES.keys())
     labels = np.zeros((X.shape[0], len(species_names)), dtype=np.int64)
 
-    for i in range(X.shape[0]):
-        presence = detect_species_presence(X[i], wavelengths, threshold_sigma)
-        for j, sp in enumerate(species_names):
-            labels[i, j] = int(presence.get(sp, False))
+    # Per-sample threshold: mean + sigma * std
+    global_mean = X.mean(axis=1)
+    global_std = X.std(axis=1)
+    threshold = global_mean + threshold_sigma * global_std  # (n_samples,)
+
+    for j, sp in enumerate(species_names):
+        delta = PLASMA_DELTA_NM.get(sp, 1.0)
+        lines = PLASMA_EMISSION_LINES.get(sp, [])
+        mask = np.zeros(len(wavelengths), dtype=bool)
+        for line_nm in lines:
+            mask |= np.abs(wavelengths - line_nm) <= delta
+
+        if mask.any():
+            max_intensity = X[:, mask].max(axis=1)  # (n_samples,)
+            labels[:, j] = (max_intensity > threshold).astype(np.int64)
 
     return labels, species_names
 
@@ -443,6 +454,10 @@ def compute_species_shap(
         background = shap.kmeans(X_for_shap, min(n_background, len(X_for_shap)))
         explainer = shap.KernelExplainer(model.predict, background)
         shap_values = explainer.shap_values(X_for_shap[:min(100, len(X_for_shap))])
+
+    # Handle shap.Explanation objects (shap >= 0.44)
+    if hasattr(shap_values, 'values'):
+        shap_values = shap_values.values
 
     # Compute feature importance in PCA space
     if isinstance(shap_values, np.ndarray) and shap_values.ndim == 3:
