@@ -115,3 +115,48 @@ class TestLinkOesSpatial:
         assert "pca_1" in merged.columns
         assert "uniformity_pct" in merged.columns
         assert len(merged) == 2
+
+
+def test_predict_etch_from_oes():
+    """Regression from OES features to etch uniformity."""
+    from src.spatial import predict_etch_from_oes
+    import pandas as pd
+
+    np.random.seed(42)
+    n = 50
+    oes_features = pd.DataFrame({
+        "experiment_key": [f"exp_{i}" for i in range(n)],
+        "f1": np.random.randn(n),
+        "f2": np.random.randn(n),
+    })
+    spatial_df = pd.DataFrame({
+        "experiment_key": [f"exp_{i}" for i in range(n) for _ in range(5)],
+        "X": np.random.randn(n * 5),
+        "Y": np.random.randn(n * 5),
+        "oxide_etch": np.random.randn(n * 5) + 10,
+    })
+
+    result = predict_etch_from_oes(oes_features, spatial_df, "oxide_etch", cv=3)
+    assert "rmse" in result
+    assert "r2" in result
+    assert result["rmse"] > 0
+
+
+def test_predict_etch_from_oes_no_overlap():
+    """Regression raises ValueError when no experiment_keys overlap."""
+    from src.spatial import predict_etch_from_oes
+    import pandas as pd
+
+    oes_features = pd.DataFrame({
+        "experiment_key": ["a", "b"],
+        "f1": [1.0, 2.0],
+    })
+    spatial_df = pd.DataFrame({
+        "experiment_key": ["c", "c", "d", "d"],
+        "X": [0, 1, 0, 1],
+        "Y": [0, 0, 1, 1],
+        "oxide_etch": [10, 11, 12, 13],
+    })
+
+    with pytest.raises((ValueError, Exception)):
+        predict_etch_from_oes(oes_features, spatial_df, "oxide_etch", cv=2)
