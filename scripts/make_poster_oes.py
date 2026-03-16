@@ -118,6 +118,18 @@ def draw_para(c, text, x, y, w, style):
     return h
 
 
+def draw_captioned_image(c, img, x, y, w, h_ratio, caption, cap_style=None):
+    """Draw image with caption below. Returns total height consumed."""
+    img_w = w
+    img_h = img_w * h_ratio
+    c.drawImage(img, x, y - img_h,
+                width=img_w, height=img_h,
+                preserveAspectRatio=True, mask="auto")
+    cap_sty = cap_style or _sty("img_cap", 14, C_SUB, align=TA_CENTER, leading=16)
+    cap_h = draw_para(c, f"<i>{caption}</i>", x, y - img_h - 1 * mm, w, cap_sty)
+    return img_h + cap_h + 4 * mm
+
+
 def fig_to_image(fig):
     """Convert matplotlib figure to reportlab ImageReader."""
     buf = io.BytesIO()
@@ -498,11 +510,8 @@ def panel_intro(c, spectrum_img):
 
     # Sample spectrum plot
     if spectrum_img:
-        img_w = w
-        img_h = img_w * 0.38
-        c.drawImage(spectrum_img, x, y - img_h,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, mask="auto")
+        dy = draw_captioned_image(c, spectrum_img, x, y, w, 0.38,
+                                  "Fig. 1: Simulated BOSCH RIE plasma OES spectrum with annotated species")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -644,12 +653,9 @@ def panel_species(c, species_img):
 
     # Species detection chart FIRST (before table)
     if species_img:
-        img_w = w
-        img_h = img_w * 0.50
-        c.drawImage(species_img, x, y - img_h,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, mask="auto")
-        y -= img_h + 3 * mm
+        dy = draw_captioned_image(c, species_img, x, y, w, 0.50,
+                                  "Fig. 2: Automated species detection rates across 15,000 OES spectra")
+        y -= dy
 
     # Compact emission lines table (top 4 species only to save space)
     dy = _draw_simple_table(c, x, y, w,
@@ -694,22 +700,15 @@ def panel_classification(c, model_img, perclass_img):
 
     # Model comparison CHART
     if model_img:
-        img_w = w + 2 * mm
-        img_h = img_w * 0.54
-        c.drawImage(model_img, x - 1 * mm, y - img_h,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, mask="auto")
-        y -= img_h + 2 * mm
+        dy = draw_captioned_image(c, model_img, x, y, w, 0.54,
+                                  "Fig. 3: 5-model accuracy and F1 comparison (5-fold CV)")
+        y -= dy
 
     # Per-class CHART
     if perclass_img:
-        img_w = w * 0.92
-        img_h = img_w * 0.60
-        offset_x = x + (w - img_w) / 2
-        c.drawImage(perclass_img, offset_x, y - img_h,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, mask="auto")
-        y -= img_h + 2 * mm
+        dy = draw_captioned_image(c, perclass_img, x + w * 0.04, y, w * 0.92, 0.60,
+                                  "Fig. 4: Per-class precision, recall, and F1 score")
+        y -= dy
 
     # Analysis (concise, 3 key points)
     analyses = [
@@ -734,12 +733,9 @@ def panel_interpretability(c, shap_img, actin_img):
 
     # SHAP chart (enlarged)
     if shap_img:
-        img_w = w + 2 * mm
-        img_h = img_w * 0.56
-        c.drawImage(shap_img, x - 1 * mm, y - img_h,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, mask="auto")
-        y -= img_h + 3 * mm
+        dy = draw_captioned_image(c, shap_img, x, y, w, 0.56,
+                                  "Fig. 5: SHAP feature importance — F I dominates (0.131)")
+        y -= dy
 
     # Key finding box
     finding = (
@@ -757,12 +753,9 @@ def panel_interpretability(c, shap_img, actin_img):
 
     # Actinometry CHART (enlarged)
     if actin_img:
-        img_w = w + 2 * mm
-        img_h = img_w * 0.50
-        c.drawImage(actin_img, x - 1 * mm, y - img_h,
-                    width=img_w, height=img_h,
-                    preserveAspectRatio=True, mask="auto")
-        y -= img_h + 3 * mm
+        dy = draw_captioned_image(c, actin_img, x, y, w, 0.50,
+                                  "Fig. 6: Actinometry ratios (I_species / I_Ar, Coburn &amp; Chen 1980)")
+        y -= dy
 
     # Boltzmann + Temporal (concise)
     boltz_temporal = (
