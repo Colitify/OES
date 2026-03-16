@@ -47,7 +47,7 @@ H_RED = "#c8102e"
 MARGIN = 14 * mm
 COL_GAP = 6 * mm
 ROW_GAP = 6 * mm
-BANNER_H = 75 * mm
+BANNER_H = 60 * mm
 PAD = 8 * mm
 RAD = 3.5 * mm
 BORDER_W = 1.5  # pt for panel borders
@@ -380,14 +380,14 @@ def draw_banner(c, logo_img=None):
     draw_para(c,
               "Liangqing Luo &nbsp;|&nbsp; Supervisor: Dr Xin Tu &nbsp;|&nbsp; "
               "Assessor: Dr Xue Yong",
-              title_x, by + 14 * mm, title_w, sty_a)
+              title_x, by + 22 * mm, title_w, sty_a)
 
     # Department
     sty_d = _sty("banner_dept", 14, HexColor("#a9cce3"), align=TA_CENTER, leading=17)
     draw_para(c,
               "Department of Electrical Engineering and Electronics, "
               "University of Liverpool",
-              title_x, by + 4 * mm, title_w, sty_d)
+              title_x, by + 12 * mm, title_w, sty_d)
 
 
 # ══════════════════════════════════════════════════════════════════
