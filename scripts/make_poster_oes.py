@@ -513,7 +513,22 @@ def panel_method(c):
         "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
         "11-channel local window)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 17, C_TEXT, leading=18))
+    dy = draw_para(c, prep_detail, x, y, w, _sty("prep_d", 17, C_TEXT, leading=18))
+    y -= dy + 3 * mm
+
+    # SNR denoising gain result
+    snr_box = (
+        "<b>Denoising result:</b> Average SNR gain = <b>10.99 dB</b> "
+        "(12.6x improvement, target &gt;= 6 dB). Measured as "
+        "10 x log10(SNR_after / SNR_before) across emission line "
+        "peaks vs off-line noise regions."
+    )
+    p_tmp = Paragraph(snr_box, S_SMALL)
+    _, sh = p_tmp.wrap(w - 4 * mm, 999 * mm)
+    bh = sh + 4 * mm
+    rrect(c, x - 1 * mm, y - bh, w + 2 * mm, bh,
+          r=2 * mm, fill=HexColor("#eafaf1"))
+    draw_para(c, snr_box, x + 1 * mm, y - 2 * mm, w - 4 * mm, S_SMALL)
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -694,6 +709,16 @@ def panel_classification(c):
                        _sty("analysis_item", 16, C_TEXT, leading=19))
         y -= dy + 2 * mm
 
+    # MC-Dropout uncertainty quantification
+    mc_text = (
+        "<b>Uncertainty quantification:</b> MC-Dropout (50 stochastic forward passes) "
+        "estimates prediction confidence. Temperature Scaling calibrates output "
+        "probabilities. ECE = <b>0.004</b> (0.4% calibration error) &mdash; "
+        "\"90% confident\" predictions are correct 90% of the time. Enables "
+        "automatic flagging of low-confidence samples for human review."
+    )
+    draw_para(c, mc_text, x, y, w, S_SMALL)
+
 
 # ══════════════════════════════════════════════════════════════════
 #  PANEL 5: Interpretability & Physics
@@ -773,12 +798,23 @@ def panel_interpretability(c, shap_img):
         "<b>Temporal analysis:</b> Attention-LSTM achieves <b>74.4%</b> "
         "phase classification accuracy on PCA(20) embedding sequences. "
         "Attention weights reveal that transition timesteps between plasma "
-        "states carry highest diagnostic information. "
-        "DTW K-Means identifies 4 discharge phases (ignition, steady-state, "
-        "transition, extinction) with 684 nm emission ratio &gt; 2x "
-        "between clusters."
+        "states carry highest diagnostic information."
     )
-    draw_para(c, temporal, x, y, w, S_SMALL)
+    dy = draw_para(c, temporal, x, y, w, S_SMALL)
+    y -= dy + 3 * mm
+
+    # DTW clustering detail
+    dtw_text = (
+        "<b>DTW 4-Phase Clustering:</b> Dynamic Time Warping K-Means "
+        "(k=4) on PCA embedding discovers 4 natural discharge phases: "
+        "ignition, steady-state, transition, extinction. "
+        "The 684 nm emission intensity (F I) differs by <b>2.04x</b> between "
+        "clusters, confirming that clustering captures real chemical state "
+        "differences (F radical density varies 2x between ignition and "
+        "steady-state). Enables unsupervised anomaly detection: deviation "
+        "from normal cluster = process excursion."
+    )
+    draw_para(c, dtw_text, x, y, w, S_SMALL)
 
 
 # ══════════════════════════════════════════════════════════════════
