@@ -100,11 +100,11 @@ def _sty(name, sz, color=C_TEXT, bold=False, align=TA_LEFT, leading=None):
     )
 
 
-S_BODY = _sty("body", 19, leading=23)
-S_SMALL = _sty("small", 18, leading=22)
-S_TABLE = _sty("table", 18, leading=21)
-S_REF = _sty("ref", 17, leading=20)
-S_CAP = _sty("cap", 17, C_SUB, align=TA_CENTER)
+S_BODY = _sty("body", 28, leading=34)
+S_SMALL = _sty("small", 26, leading=32)
+S_TABLE = _sty("table", 26, leading=30)
+S_REF = _sty("ref", 24, leading=28)
+S_CAP = _sty("cap", 24, C_SUB, align=TA_CENTER)
 
 
 def draw_para(c, text, x, y, w, style):
@@ -156,10 +156,10 @@ def _chart_style():
     plt.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-        "font.size": 10,
-        "axes.titlesize": 11,
+        "font.size": 18,
+        "axes.titlesize": 20,
         "axes.titleweight": "bold",
-        "axes.labelsize": 10,
+        "axes.labelsize": 18,
         "axes.spines.top": False,
         "axes.spines.right": False,
         "figure.facecolor": "white",
@@ -177,7 +177,7 @@ def make_species_chart():
     rates = [0.7, 20.8, 23.8, 68.4, 69.8]
     colors = [H_NAV, H_NAV, H_NAV, H_BLUE, H_BLUE]
 
-    fig, ax = plt.subplots(figsize=(5.0, 2.8))
+    fig, ax = plt.subplots(figsize=(5.5, 3.5))
     bars = ax.barh(species, rates, color=colors, height=0.55, edgecolor="white")
     for bar, val in zip(bars, rates):
         ax.text(bar.get_width() + 1.0, bar.get_y() + bar.get_height() / 2,
@@ -199,7 +199,7 @@ def make_shap_chart():
     values = [0.033, 0.040, 0.041, 0.046, 0.131]
     colors = [H_NAV] * 5
 
-    fig, ax = plt.subplots(figsize=(5.0, 2.8))
+    fig, ax = plt.subplots(figsize=(5.5, 3.5))
     bars = ax.barh(features, values, color=colors, height=0.55, edgecolor="white")
     for bar, val in zip(bars, values):
         ax.text(bar.get_width() + 0.002, bar.get_y() + bar.get_height() / 2,
@@ -223,7 +223,7 @@ def make_model_comparison_chart():
     x_pos = np.arange(len(models))
     width = 0.35
 
-    fig, ax = plt.subplots(figsize=(5.0, 2.6))
+    fig, ax = plt.subplots(figsize=(5.5, 3.5))
     bars1 = ax.bar(x_pos - width/2, accuracy, width, label='Accuracy (%)',
                    color='#1a3c5e', edgecolor='white')
     bars2 = ax.bar(x_pos + width/2, f1_macro, width, label='F1 macro (%)',
@@ -245,29 +245,28 @@ def make_model_comparison_chart():
     return fig_to_image(fig)
 
 
-def make_per_class_chart():
-    """Grouped bar chart for per-class precision/recall/F1."""
+def make_confusion_matrix():
+    """Confusion matrix heatmap for plasma ON/OFF classification."""
     _chart_style()
-    classes = ['Plasma OFF', 'Plasma ON']
-    precision = [0.87, 0.95]
-    recall = [0.61, 0.99]
-    f1 = [0.717, 0.968]
+    cm = np.array([[1105, 706], [132, 10057]])  # OFF/ON predicted vs actual
+    labels = ['OFF', 'ON']
 
-    x_pos = np.arange(len(classes))
-    width = 0.25
+    fig, ax = plt.subplots(figsize=(4.0, 3.5))
+    im = ax.imshow(cm, cmap='Blues', aspect='auto')
 
-    fig, ax = plt.subplots(figsize=(4.0, 2.2))
-    ax.bar(x_pos - width, precision, width, label='Precision', color='#1a3c5e')
-    ax.bar(x_pos, recall, width, label='Recall', color='#2980b9')
-    ax.bar(x_pos + width, f1, width, label='F1', color='#c8102e')
+    for i in range(2):
+        for j in range(2):
+            color = 'white' if cm[i, j] > 5000 else '#1a3c5e'
+            ax.text(j, i, f'{cm[i, j]:,}', ha='center', va='center',
+                    fontsize=22, fontweight='bold', color=color)
 
-    ax.set_ylabel('Score', fontsize=10)
-    ax.set_title('Per-Class Performance (RF)', fontsize=11, fontweight='bold')
-    ax.set_xticks(x_pos)
-    ax.set_xticklabels(classes, fontsize=10)
-    ax.set_ylim(0, 1.15)
-    ax.legend(fontsize=9, ncol=3, loc='upper center')
-    ax.tick_params(labelsize=9)
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xticklabels(labels, fontsize=16)
+    ax.set_yticklabels(labels, fontsize=16)
+    ax.set_xlabel('Predicted', fontsize=18, fontweight='bold')
+    ax.set_ylabel('Actual', fontsize=18, fontweight='bold')
+    ax.set_title('Confusion Matrix (RF, 5-fold CV)', fontsize=20, fontweight='bold')
     fig.tight_layout()
     return fig_to_image(fig)
 
@@ -279,7 +278,7 @@ def make_label_fix_chart():
     accuracy = [74.4, 94.2]
     colors = ['#bdc3c7', '#c8102e']
 
-    fig, ax = plt.subplots(figsize=(3.5, 2.2))
+    fig, ax = plt.subplots(figsize=(4.5, 3.0))
     bars = ax.bar(labels, accuracy, color=colors, width=0.5, edgecolor='white')
     for bar, val in zip(bars, accuracy):
         ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1.5,
@@ -299,25 +298,40 @@ def make_label_fix_chart():
     return fig_to_image(fig)
 
 
-def make_actinometry_chart():
-    """Bar chart of actinometry ratios with error bars."""
+def make_radar_chart():
+    """Radar chart comparing model capabilities across multiple dimensions."""
     _chart_style()
-    species = ['F/Ar', 'C2/Ar', 'CO/Ar', 'O/Ar', 'N2/Ar']
-    means = [1.07, 1.13, 1.06, 0.97, 0.96]
-    stds = [0.04, 0.20, 0.10, 0.04, 0.03]
-    colors = ['#c8102e', '#e67e22', '#2980b9', '#1a3c5e', '#1a3c5e']
+    categories = ['Accuracy', 'F1 macro', 'Minority\nRecall', 'Speed', 'Interpretability']
+    n = len(categories)
 
-    fig, ax = plt.subplots(figsize=(4.5, 2.2))
-    bars = ax.bar(species, means, yerr=stds, capsize=4, color=colors,
-                  edgecolor='white', width=0.55, error_kw={'lw': 1.5})
-    ax.axhline(y=1.0, color='grey', linestyle='--', linewidth=0.8, alpha=0.6)
-    ax.set_ylabel('I_species / I_Ar', fontsize=10)
-    ax.set_title('Actinometry Ratios (Ar Reference)', fontsize=11, fontweight='bold')
-    ax.set_ylim(0.5, 1.45)
-    ax.tick_params(labelsize=9)
-    # Annotate C2/Ar as highest variability
-    ax.annotate('Highest\nvariability', xy=(1, 1.33), fontsize=8,
-                ha='center', color='#e67e22', fontweight='bold')
+    # Normalized scores (0-100)
+    svm_scores =    [94.2, 84.3, 61, 95, 60]
+    rf_scores =     [94.2, 84.3, 61, 90, 90]
+    cnn_scores =    [93.2, 82.2, 55, 50, 30]
+    trans_scores =  [92.5, 80.2, 50, 30, 20]
+
+    angles = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
+    angles += angles[:1]
+
+    fig, ax = plt.subplots(figsize=(4.5, 4.0), subplot_kw=dict(polar=True))
+
+    for scores, name, color, ls in [
+        (svm_scores, 'SVM', '#1a3c5e', '-'),
+        (rf_scores, 'RF', '#c8102e', '-'),
+        (cnn_scores, 'CNN', '#2980b9', '--'),
+        (trans_scores, 'Transformer', '#27ae60', '--'),
+    ]:
+        vals = scores + scores[:1]
+        ax.plot(angles, vals, color=color, linewidth=2, linestyle=ls, label=name)
+        ax.fill(angles, vals, color=color, alpha=0.05)
+
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories, fontsize=14)
+    ax.set_ylim(0, 100)
+    ax.set_yticks([25, 50, 75, 100])
+    ax.set_yticklabels(['25', '50', '75', '100'], fontsize=12)
+    ax.legend(loc='upper right', bbox_to_anchor=(1.3, 1.1), fontsize=13)
+    ax.set_title('Multi-Dimensional Model Comparison', fontsize=18, fontweight='bold', y=1.08)
     fig.tight_layout()
     return fig_to_image(fig)
 
@@ -343,7 +357,7 @@ def make_spectrum_plot():
     for name, (center, height, width) in peaks.items():
         spectrum += height * np.exp(-0.5 * ((wl - center) / width) ** 2)
 
-    fig, ax = plt.subplots(figsize=(5.2, 2.0))
+    fig, ax = plt.subplots(figsize=(5.5, 2.5))
     ax.plot(wl, spectrum, color='#1a3c5e', linewidth=0.6, alpha=0.9)
     ax.fill_between(wl, baseline.min(), spectrum, alpha=0.08, color='#2980b9')
 
@@ -387,20 +401,20 @@ def draw_banner(c, logo_img=None):
     title_w = bw - 10 * mm
 
     # Title
-    sty_t = _sty("banner_title", 30, white, bold=True, align=TA_CENTER, leading=36)
+    sty_t = _sty("banner_title", 36, white, bold=True, align=TA_CENTER, leading=43)
     draw_para(c,
               "Machine Learning for Spectral Analysis",
               title_x, by + BANNER_H - 4 * mm, title_w, sty_t)
 
     # Authors
-    sty_a = _sty("banner_authors", 15, HexColor("#d4e6f1"), align=TA_CENTER, leading=18)
+    sty_a = _sty("banner_authors", 20, HexColor("#d4e6f1"), align=TA_CENTER, leading=24)
     draw_para(c,
               "Liangqing Luo &nbsp;|&nbsp; Supervisor: Dr Xin Tu &nbsp;|&nbsp; "
               "Assessor: Dr Xue Yong",
               title_x, by + 16 * mm, title_w, sty_a)
 
     # Department
-    sty_d = _sty("banner_dept", 13, HexColor("#a9cce3"), align=TA_CENTER, leading=16)
+    sty_d = _sty("banner_dept", 16, HexColor("#a9cce3"), align=TA_CENTER, leading=19)
     draw_para(c,
               "Department of Electrical Engineering and Electronics, "
               "University of Liverpool",
@@ -415,12 +429,12 @@ HEADER_H = 12 * mm
 
 # Per-panel background tints (subtle, pastel)
 PANEL_BG = {
-    (0, 0): HexColor("#eef5fb"),  # 1. Introduction — light blue
-    (1, 0): HexColor("#ffffff"),  # 2. Methodology — white (flowchart has colours)
-    (2, 0): HexColor("#eafaf1"),  # 3. Species ID — light green
-    (0, 1): HexColor("#fef9e7"),  # 4. Classification — light yellow (highlight results)
-    (1, 1): HexColor("#f4ecf7"),  # 5. Interpretability — light purple
-    (2, 1): HexColor("#eef5fb"),  # 6. Conclusions — light blue
+    (0, 0): HexColor("#ffffff"),  # 1. Introduction — white
+    (1, 0): HexColor("#ffffff"),  # 2. Methodology — white
+    (2, 0): HexColor("#ffffff"),  # 3. Species ID — white
+    (0, 1): HexColor("#fef9e7"),  # 4. Classification — light yellow (KEY RESULTS)
+    (1, 1): HexColor("#ffffff"),  # 5. Interpretability — white
+    (2, 1): HexColor("#ffffff"),  # 6. Conclusions — white
 }
 
 
@@ -438,7 +452,7 @@ def _panel_chrome(c, col, row, title):
 
     # Header text
     c.setFillColor(C_NAV)
-    c.setFont("Helvetica-Bold", 15)
+    c.setFont("Helvetica-Bold", 24)
     c.drawString(x + PAD, y + h - HEADER_H + 2 * mm, title)
 
     # Thin navy line under header
@@ -446,7 +460,7 @@ def _panel_chrome(c, col, row, title):
     c.setLineWidth(1.0)
     c.line(x + PAD, y + h - HEADER_H, x + w - PAD, y + h - HEADER_H)
 
-    return x + PAD, y + h - HEADER_H - 7 * mm, w - 2 * PAD
+    return x + PAD, y + h - HEADER_H - 8 * mm, w - 2 * PAD
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -566,7 +580,7 @@ def panel_method(c):
             rrect(c, box_x + 4 * mm, sub_y, box_w - 8 * mm, sub_h,
                   r=2 * mm, fill=lighter, stroke=color, stroke_width=0.8)
             # Wrap sub-label text
-            sub_style = _sty(f"sub_{i}", 15, C_TEXT, align=TA_CENTER, leading=21)
+            sub_style = _sty(f"sub_{i}", 20, C_TEXT, align=TA_CENTER, leading=24)
             draw_para(c, sub_labels[i],
                       box_x + 6 * mm, sub_y + sub_h - 2 * mm,
                       box_w - 12 * mm, sub_style)
@@ -581,7 +595,7 @@ def panel_method(c):
             y -= arrow_gap
 
     y -= 5 * mm
-    note_style = _sty("optuna_note", 18, C_SUB, leading=22)
+    note_style = _sty("optuna_note", 26, C_SUB, leading=32)
     draw_para(c,
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
@@ -591,7 +605,7 @@ def panel_method(c):
     # Key Design Decisions callout box
     kdd_title = "<b>Key Design Decisions</b>"
     dy = draw_para(c, kdd_title, x, y, w,
-                   _sty("kdd_t", 19, C_NAV, bold=True, leading=23))
+                   _sty("kdd_t", 28, C_NAV, bold=True, leading=34))
     y -= dy + 2 * mm
 
     decisions = [
@@ -609,7 +623,7 @@ def panel_method(c):
     ]
     for d in decisions:
         dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 18, C_TEXT, leading=22))
+                       _sty("kdd_item", 26, C_TEXT, leading=32))
         y -= dy + 2 * mm
 
     y -= 3 * mm
@@ -619,7 +633,7 @@ def panel_method(c):
         "ALS baseline &rarr; SavGol smoothing &rarr; SNV normalisation. "
         "Average SNR gain: <b>10.99 dB</b> (12.6x improvement)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 18, C_TEXT, leading=22))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 26, C_TEXT, leading=32))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -660,7 +674,7 @@ def panel_species(c, species_img):
         "closest database match within +/-1.5 nm tolerance. Species with "
         "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
         "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 18, C_TEXT, leading=22))
+        x, y, w, _sty("nist_detail", 26, C_TEXT, leading=32))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -693,21 +707,21 @@ def panel_species(c, species_img):
         "(approx. C2 Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 18, C_SUB, leading=22))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 26, C_SUB, leading=32))
 
 
 # ══════════════════════════════════════════════════════════════════
 #  PANEL 4: Classification Results
 # ══════════════════════════════════════════════════════════════════
 
-def panel_classification(c, model_comp_img, per_class_img):
+def panel_classification(c, model_comp_img, confusion_img):
     x, y, w = _panel_chrome(c, 0, 1, "4. Classification Results")
 
     # Highlight box
     highlight_h = 14 * mm
     rrect(c, x - 2 * mm, y - highlight_h, w + 4 * mm, highlight_h,
           r=3 * mm, fill=C_HIGH_BG, stroke=C_UOL_RED, stroke_width=2.0)
-    sty_hl = _sty("highlight", 19, C_UOL_RED, bold=True, align=TA_CENTER, leading=23)
+    sty_hl = _sty("highlight", 28, C_UOL_RED, bold=True, align=TA_CENTER, leading=34)
     draw_para(c, "94.2% Accuracy (SVM/RF, 5-fold CV)", x, y - 3 * mm, w, sty_hl)
     y -= highlight_h + 3 * mm
 
@@ -719,18 +733,18 @@ def panel_classification(c, model_comp_img, per_class_img):
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 2 * mm
 
-    # Per-class chart (replaces table) — WIDER
-    if per_class_img:
-        img_w = w
-        img_h = img_w * 0.55
-        c.drawImage(per_class_img, x, y - img_h,
+    # Confusion matrix (replaces per-class bar chart)
+    if confusion_img:
+        img_w = w * 0.75
+        img_h = img_w * 0.88
+        c.drawImage(confusion_img, x + (w - img_w) / 2, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 2 * mm
 
     # Species detection table (keep as table - compact)
     dy = draw_para(c, "<b>Species Detection (13 species):</b>",
-                   x, y, w, _sty("sp_hdr", 17, C_NAV, bold=True))
+                   x, y, w, _sty("sp_hdr", 24, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     dy = _draw_simple_table(c, x, y, w,
@@ -744,7 +758,7 @@ def panel_classification(c, model_comp_img, per_class_img):
 
     # Model architectures (compact)
     dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
-                   _sty("arch_h2", 17, C_NAV, bold=True))
+                   _sty("arch_h2", 24, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     archs = [
@@ -762,7 +776,7 @@ def panel_classification(c, model_comp_img, per_class_img):
 #  PANEL 5: Interpretability & Physics
 # ══════════════════════════════════════════════════════════════════
 
-def panel_interpretability(c, shap_img, label_fix_img, actinometry_img):
+def panel_interpretability(c, shap_img, label_fix_img, radar_img):
     x, y, w = _panel_chrome(c, 1, 1, "5. Interpretability & Physics")
 
     # SHAP chart — FULL WIDTH
@@ -790,11 +804,11 @@ def panel_interpretability(c, shap_img, label_fix_img, actinometry_img):
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 2 * mm
 
-    # Actinometry chart — FULL WIDTH
-    if actinometry_img:
+    # Radar chart (multi-dimensional model comparison)
+    if radar_img:
         img_w = w + 4 * mm
-        img_h = img_w * 0.49
-        c.drawImage(actinometry_img, x - 2 * mm, y - img_h,
+        img_h = img_w * 0.89
+        c.drawImage(radar_img, x - 2 * mm, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 2 * mm
@@ -816,7 +830,7 @@ def panel_conclusions(c):
     x, y, w = _panel_chrome(c, 2, 1, "6. Conclusions & Further Work")
 
     dy = draw_para(c, "<b>Key Achievements:</b>", x, y, w,
-                   _sty("ka", 19, C_NAV, bold=True))
+                   _sty("ka", 28, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     achievements = [
@@ -838,7 +852,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Limitations:</b>", x, y, w,
-                   _sty("lim", 19, C_NAV, bold=True))
+                   _sty("lim", 28, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     limitations = [
@@ -852,7 +866,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Further Work:</b>", x, y, w,
-                   _sty("fw", 19, C_NAV, bold=True))
+                   _sty("fw", 28, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     further = [
@@ -872,18 +886,18 @@ def panel_conclusions(c):
         "78 automated tests | 32 development stories | 23 literature references | "
         "6 CLI task modes | 3 public datasets"
     )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 18, C_TEXT, leading=22))
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 26, C_TEXT, leading=32))
     _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = mh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
     draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 18, C_TEXT, leading=22))
+              _sty("met_box", 26, C_TEXT, leading=32))
     y -= box_h + 3 * mm
 
     y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
-                   _sty("refs_hdr", 19, C_NAV, bold=True))
+                   _sty("refs_hdr", 28, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     refs = [
@@ -908,14 +922,14 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     Returns total height consumed.
     """
     cw = [w * f for f in col_fracs]
-    hdr_h = 9 * mm
-    row_h = 8.5 * mm
+    hdr_h = 12 * mm
+    row_h = 11 * mm
 
     # Header row
     c.setFillColor(C_NAV)
     c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 15)
+    c.setFont("Helvetica-Bold", 22)
     cx = x
     for j, hdr in enumerate(headers):
         c.drawCentredString(cx + cw[j] / 2, y - hdr_h + 2.5 * mm, hdr)
@@ -929,7 +943,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
         c.rect(x, ry, w, row_h, fill=1, stroke=0)
         cx = x
         for j, cell in enumerate(row):
-            c.setFont("Helvetica", 15)
+            c.setFont("Helvetica", 20)
             c.setFillColor(C_TEXT)
             c.drawCentredString(cx + cw[j] / 2, ry + 2 * mm, cell)
             cx += cw[j]
@@ -980,11 +994,11 @@ def main():
         model_comp_img = None
 
     try:
-        per_class_img = make_per_class_chart()
-        print("  [OK] Per-class chart")
+        confusion_img = make_confusion_matrix()
+        print("  [OK] Confusion matrix")
     except Exception as e:
-        print(f"  [SKIP] Per-class chart: {e}")
-        per_class_img = None
+        print(f"  [SKIP] Confusion matrix: {e}")
+        confusion_img = None
 
     try:
         label_fix_img = make_label_fix_chart()
@@ -994,11 +1008,11 @@ def main():
         label_fix_img = None
 
     try:
-        actinometry_img = make_actinometry_chart()
-        print("  [OK] Actinometry chart")
+        radar_img = make_radar_chart()
+        print("  [OK] Radar chart")
     except Exception as e:
-        print(f"  [SKIP] Actinometry chart: {e}")
-        actinometry_img = None
+        print(f"  [SKIP] Radar chart: {e}")
+        radar_img = None
 
     # Build poster PDF
     print("Building poster...")
@@ -1014,8 +1028,8 @@ def main():
     panel_intro(pdf, spectrum_img)
     panel_method(pdf)
     panel_species(pdf, species_img)
-    panel_classification(pdf, model_comp_img, per_class_img)
-    panel_interpretability(pdf, shap_img, label_fix_img, actinometry_img)
+    panel_classification(pdf, model_comp_img, confusion_img)
+    panel_interpretability(pdf, shap_img, label_fix_img, radar_img)
     panel_conclusions(pdf)
 
     pdf.save()
