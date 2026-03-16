@@ -128,12 +128,12 @@ def load_uol_logo():
     """Load University of Liverpool logo as white silhouette on navy background.
 
     Composites the logo onto a navy (#1a3c5e) background with opaque pixels
-    rendered as white. Saves to a temp file to avoid BytesIO seek issues.
+    rendered as white. Saves to a permanent file next to the source logo.
     """
     logo_path = Path(__file__).resolve().parent / "uol_logo_full.png"
+    out_path = Path(__file__).resolve().parent / "uol_logo_navy.png"
     if logo_path.exists():
         from PIL import Image
-        import tempfile
         img = Image.open(logo_path).convert("RGBA")
         data = np.array(img)
 
@@ -147,10 +147,8 @@ def load_uol_logo():
             ).astype(np.uint8)
 
         img_out = Image.fromarray(result, "RGB")
-        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        img_out.save(tmp.name, format="PNG")
-        tmp.close()
-        return tmp.name  # return file path, not ImageReader
+        img_out.save(str(out_path), format="PNG")
+        return str(out_path)
     return None
 
 
@@ -229,8 +227,7 @@ def make_spectrum_plot():
     peaks = {
         'F I': (685.6, 1200, 3),
         'Ar I': (750.4, 1800, 2.5),
-        'C2': (516.5, 800, 5),
-        'CO': (519.8, 600, 4),
+        'C2/CO': (517.0, 900, 5),  # merged C2+CO into single peak (3nm apart)
         'Ha': (656.3, 400, 3),
         'O I': (777.4, 500, 2),
     }
@@ -241,13 +238,20 @@ def make_spectrum_plot():
     ax.plot(wl, spectrum, color='#1a3c5e', linewidth=0.6, alpha=0.9)
     ax.fill_between(wl, baseline.min(), spectrum, alpha=0.08, color='#2980b9')
 
-    # Annotate top 4 peaks
-    for name, (center, height, _) in list(peaks.items())[:4]:
-        idx = np.argmin(np.abs(wl - center))
-        ax.annotate(name, xy=(center, spectrum[idx]),
-                    xytext=(center, spectrum[idx] + 300),
+    # Annotate key peaks with manual offsets to avoid overlap
+    annotations = [
+        ('F I',    685.6, (685.6, None), 'center'),
+        ('Ar I',   750.4, (750.4, None), 'center'),
+        ('C2/CO',  517.0, (480.0, None), 'center'),  # offset label left
+        ('Ha',     656.3, (656.3, None), 'center'),
+    ]
+    for name, peak_nm, (text_x, _), ha in annotations:
+        idx = np.argmin(np.abs(wl - peak_nm))
+        peak_y = spectrum[idx]
+        ax.annotate(name, xy=(peak_nm, peak_y),
+                    xytext=(text_x, peak_y + 350),
                     fontsize=8, fontweight='bold', color='#c8102e',
-                    ha='center', arrowprops=dict(arrowstyle='->', color='#c8102e', lw=0.8))
+                    ha=ha, arrowprops=dict(arrowstyle='->', color='#c8102e', lw=0.8))
 
     ax.set_xlabel('Wavelength (nm)', fontsize=9)
     ax.set_ylabel('Intensity (counts)', fontsize=9)
@@ -475,7 +479,7 @@ def panel_method(c):
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
               x, y, w, note_style)
-    y -= 14
+    y -= 8 * mm
 
     # Key Design Decisions callout box
     kdd_title = "<b>Key Design Decisions</b>"
