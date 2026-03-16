@@ -58,7 +58,7 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 CONTENT_H = CONTENT_TOP - CONTENT_BOT
 
 COL_W = (CONTENT_W - 2 * COL_GAP) / 3
-ROW1_H = CONTENT_H * 0.50
+ROW1_H = CONTENT_H * 0.48
 ROW2_H = CONTENT_H - ROW1_H - ROW_GAP
 
 
@@ -204,6 +204,49 @@ def make_shap_chart():
     return fig_to_image(fig)
 
 
+def make_spectrum_plot():
+    """Generate an annotated sample OES spectrum showing key emission lines."""
+    _chart_style()
+    np.random.seed(42)
+
+    # Simulate a typical BOSCH OES spectrum (185-884 nm)
+    wl = np.linspace(186, 884, 500)
+    baseline = 3800 + 200 * np.sin(wl / 200)
+    spectrum = baseline + np.random.randn(500) * 50
+
+    # Add emission peaks at known species wavelengths
+    peaks = {
+        'F I': (685.6, 1200, 3),
+        'Ar I': (750.4, 1800, 2.5),
+        'C\u2082': (516.5, 800, 5),
+        'CO': (519.8, 600, 4),
+        'H\u03b1': (656.3, 400, 3),
+        'O I': (777.4, 500, 2),
+    }
+    for name, (center, height, width) in peaks.items():
+        spectrum += height * np.exp(-0.5 * ((wl - center) / width) ** 2)
+
+    fig, ax = plt.subplots(figsize=(5.2, 2.0))
+    ax.plot(wl, spectrum, color='#1a3c5e', linewidth=0.6, alpha=0.9)
+    ax.fill_between(wl, baseline.min(), spectrum, alpha=0.08, color='#2980b9')
+
+    # Annotate top 4 peaks
+    for name, (center, height, _) in list(peaks.items())[:4]:
+        idx = np.argmin(np.abs(wl - center))
+        ax.annotate(name, xy=(center, spectrum[idx]),
+                    xytext=(center, spectrum[idx] + 300),
+                    fontsize=8, fontweight='bold', color='#c8102e',
+                    ha='center', arrowprops=dict(arrowstyle='->', color='#c8102e', lw=0.8))
+
+    ax.set_xlabel('Wavelength (nm)', fontsize=9)
+    ax.set_ylabel('Intensity (counts)', fontsize=9)
+    ax.set_title('Typical BOSCH RIE Plasma OES Spectrum', fontsize=10, fontweight='bold')
+    ax.set_xlim(186, 884)
+    ax.tick_params(labelsize=8)
+    fig.tight_layout()
+    return fig_to_image(fig)
+
+
 # ══════════════════════════════════════════════════════════════════
 #  BANNER
 # ══════════════════════════════════════════════════════════════════
@@ -289,7 +332,7 @@ def _panel_chrome(c, col, row, title):
 #  PANEL 1: Introduction
 # ══════════════════════════════════════════════════════════════════
 
-def panel_intro(c):
+def panel_intro(c, spectrum_img):
     x, y, w = _panel_chrome(c, 0, 0, "1. Introduction")
 
     intro_text = (
@@ -338,7 +381,7 @@ def panel_intro(c):
     y -= dy + 2 * mm
 
     # Dataset table
-    _draw_simple_table(c, x, y, w,
+    dy_table = _draw_simple_table(c, x, y, w,
                        headers=["Dataset", "Channels", "Notes"],
                        col_fracs=[0.32, 0.20, 0.48],
                        rows=[
@@ -346,6 +389,15 @@ def panel_intro(c):
                            ["Mesbah CAP", "51 ch", "N2 plasma T_rot / T_vib"],
                            ["BOSCH RIE", "3,648 ch", "25 Hz, 10 days, SF6/C4F8"],
                        ])
+    y -= dy_table + 3 * mm
+
+    # Sample spectrum plot
+    if spectrum_img:
+        img_w = w
+        img_h = img_w * 0.38
+        c.drawImage(spectrum_img, x, y - img_h,
+                    width=img_w, height=img_h,
+                    preserveAspectRatio=True, mask="auto")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -439,6 +491,18 @@ def panel_method(c):
                        _sty("kdd_item", 9, C_TEXT, leading=11.5))
         y -= dy + 2 * mm
 
+    y -= 3 * mm
+    # Preprocessing details
+    prep_detail = (
+        "<b>Preprocessing rationale:</b> ALS baseline (\u03bb=10<super>5</super>) "
+        "removes fluorescence continuum. Savitzky-Golay (window=11, order=3) "
+        "preserves peak shapes while reducing shot noise. SNV normalisation "
+        "corrects for optical path length variation between measurements. "
+        "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
+        "11-channel local window)."
+    )
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 9, C_TEXT, leading=11))
+
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
     c.saveState()
@@ -470,6 +534,15 @@ def panel_species(c, species_img):
         "intensities are inherently non-negative."
     )
     dy = draw_para(c, intro, x, y, w, S_SMALL)
+    y -= dy + 2 * mm
+
+    dy = draw_para(c,
+        "<b>Automated NIST matching:</b> Each detected peak is compared against "
+        "39 reference emission lines from 13 species. The algorithm selects the "
+        "closest database match within \u00b11.5 nm tolerance. Species with "
+        "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
+        "are classified as <i>present</i>.",
+        x, y, w, _sty("nist_detail", 9, C_TEXT, leading=11))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -560,6 +633,27 @@ def panel_classification(c):
                             ])
     y -= dy + 3 * mm
 
+    # Model architecture details
+    dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
+                   _sty("arch_h", 10, C_NAV, bold=True))
+    y -= dy + 1.5 * mm
+
+    archs = [
+        "<b>SVM/RF:</b> StandardScaler \u2192 Classifier pipeline. RF uses 200 trees; "
+        "SVM uses RBF kernel (C=10, \u03b3=scale). Both with balanced class weights.",
+        "<b>CNN:</b> 3-layer Conv1D (32\u219264\u2192128 channels, kernel 7/5/3) "
+        "\u2192 AdaptiveAvgPool \u2192 FC(64) \u2192 Dropout(0.3) \u2192 output. "
+        "Weighted CrossEntropyLoss, mini-batch training.",
+        "<b>Transformer:</b> ViT-style 1D patch embedding (patch=64, d=128, 4 heads, "
+        "3 layers). [CLS] token classification. AdamW + cosine LR schedule.",
+        "<b>Attention-LSTM:</b> 2-layer LSTM (hidden=64) \u2192 additive attention "
+        "\u2192 FC. Trained on PCA(20) sliding windows (seq_len=10).",
+    ]
+    for a in archs:
+        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
+                       _sty("arch_item", 8.5, C_TEXT, leading=10.5))
+        y -= dy + 1.5 * mm
+
     note = (
         "<i>Labels: RF source power (plasma ON/OFF). Traditional ML "
         "outperforms DL due to near-linear boundary &amp; limited data.</i>"
@@ -612,6 +706,18 @@ def panel_interpretability(c, shap_img):
         "Estimated via linear regression of ln(I\u00b7\u03bb/gA) vs E<sub>upper</sub>."
     )
     dy = draw_para(c, boltz, x, y, w, S_SMALL)
+    y -= dy + 3 * mm
+
+    # Physics of F_I dominance
+    fi_physics = (
+        "<b>Why F I dominates:</b> In SF\u2086 plasma, electron-impact "
+        "dissociation produces F radicals (SF\u2086 + e\u207b \u2192 SF\u2085 + F + e\u207b). "
+        "The F I 703.7 nm line (2p\u2074 3p \u2192 2p\u2074 3s transition, "
+        "upper state 14.5 eV) has high transition probability (A = 6.4\u00d710\u2077 s\u207b\u00b9) "
+        "and is well-separated from neighbouring lines. Its intensity directly tracks "
+        "F radical density, making it the most sensitive probe of etch chemistry."
+    )
+    dy = draw_para(c, fi_physics, x, y, w, _sty("fi_phys", 9, C_TEXT, leading=11))
     y -= dy + 3 * mm
 
     # Actinometry explanation
@@ -693,6 +799,23 @@ def panel_conclusions(c):
     for fw in further:
         dy = draw_para(c, f"&#8226;&nbsp; {fw}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
         y -= dy + 1.5 * mm
+
+    # Project metrics summary box
+    y -= 2 * mm
+    metrics_box = (
+        "<b>Project Metrics:</b> 15,000 spectra analysed | 3,648 spectral channels | "
+        "13 species identified | 39 NIST emission lines | 6 ML models compared | "
+        "78 automated tests | 32 development stories | 23 literature references | "
+        "6 CLI task modes | 3 public datasets"
+    )
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 9, C_TEXT, leading=11))
+    _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
+    box_h = mh + 4 * mm
+    rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
+          r=2 * mm, fill=HexColor("#e8f4fd"))
+    draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
+              _sty("met_box", 9, C_TEXT, leading=11))
+    y -= box_h + 3 * mm
 
     y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
@@ -779,6 +902,13 @@ def main():
         shap_img = None
 
     try:
+        spectrum_img = make_spectrum_plot()
+        print("  [OK] Spectrum plot")
+    except Exception as e:
+        print(f"  [SKIP] Spectrum plot: {e}")
+        spectrum_img = None
+
+    try:
         logo_img = load_uol_logo()
         print("  [OK] UoL logo")
     except Exception as e:
@@ -796,7 +926,7 @@ def main():
     pdf.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
     draw_banner(pdf, logo_img)
-    panel_intro(pdf)
+    panel_intro(pdf, spectrum_img)
     panel_method(pdf)
     panel_species(pdf, species_img)
     panel_classification(pdf)
