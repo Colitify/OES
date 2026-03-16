@@ -369,25 +369,25 @@ def draw_banner(c, logo_img=None):
     title_x = bx + 5 * mm
     title_w = bw - 10 * mm
 
-    # Title
-    sty_t = _sty("banner_title", 30, white, bold=True, align=TA_CENTER, leading=36)
+    # Title (large, fills banner)
+    sty_t = _sty("banner_title", 40, white, bold=True, align=TA_CENTER, leading=44)
     draw_para(c,
               "Machine Learning for Spectral Analysis",
-              title_x, by + BANNER_H - 4 * mm, title_w, sty_t)
+              title_x, by + BANNER_H - 3 * mm, title_w, sty_t)
 
     # Authors
-    sty_a = _sty("banner_authors", 15, HexColor("#d4e6f1"), align=TA_CENTER, leading=18)
+    sty_a = _sty("banner_authors", 17, HexColor("#d4e6f1"), align=TA_CENTER, leading=20)
     draw_para(c,
               "Liangqing Luo &nbsp;|&nbsp; Supervisor: Dr Xin Tu &nbsp;|&nbsp; "
               "Assessor: Dr Xue Yong",
-              title_x, by + 16 * mm, title_w, sty_a)
+              title_x, by + 14 * mm, title_w, sty_a)
 
     # Department
-    sty_d = _sty("banner_dept", 13, HexColor("#a9cce3"), align=TA_CENTER, leading=16)
+    sty_d = _sty("banner_dept", 14, HexColor("#a9cce3"), align=TA_CENTER, leading=17)
     draw_para(c,
               "Department of Electrical Engineering and Electronics, "
               "University of Liverpool",
-              title_x, by + 6 * mm, title_w, sty_d)
+              title_x, by + 4 * mm, title_w, sty_d)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -456,43 +456,30 @@ def panel_intro(c, spectrum_img):
         x, y, w, S_BODY_L)
     y -= dy + 3 * mm
 
-    # 4 objectives as horizontal flowchart boxes
+    # 4 objectives as 2x2 grid flowchart
     objectives = [
-        ("1. Feature ID", "Peak detection\nNMF + NIST", HexColor("#2980b9")),
-        ("2. Classification", "SVM/RF/CNN\nTransformer (6)", HexColor("#8e44ad")),
-        ("3. Temporal", "Attention-LSTM\nSpecies series", HexColor("#27ae60")),
-        ("4. Intensity", "Actinometry\nBoltzmann Te", HexColor("#e67e22")),
+        ("1. Feature ID", "Peak detection, NMF,\nNIST matching", HexColor("#2980b9")),
+        ("2. Classification", "SVM, RF, CNN,\nTransformer (6 models)", HexColor("#8e44ad")),
+        ("3. Temporal", "Attention-LSTM,\nSpecies time-series", HexColor("#27ae60")),
+        ("4. Intensity", "Actinometry,\nBoltzmann Te", HexColor("#e67e22")),
     ]
-    obj_w = (w - 3 * 4 * mm) / 4  # 4 boxes with 4mm gaps
-    obj_h = 28 * mm
-    obj_x = x
+    grid_gap = 4 * mm
+    obj_w = (w - grid_gap) / 2
+    obj_h = 22 * mm
     for i, (title, desc, color) in enumerate(objectives):
-        bx = obj_x + i * (obj_w + 4 * mm)
-        rrect(c, bx, y - obj_h, obj_w, obj_h, r=3 * mm, fill=color)
-        # Title
+        col_i = i % 2
+        row_i = i // 2
+        bx = x + col_i * (obj_w + grid_gap)
+        by_box = y - obj_h - row_i * (obj_h + grid_gap)
+        rrect(c, bx, by_box, obj_w, obj_h, r=3 * mm, fill=color)
         c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawCentredString(bx + obj_w / 2, y - 9 * mm, title)
-        # Description
-        c.setFont("Helvetica", 9)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawCentredString(bx + obj_w / 2, by_box + obj_h - 8 * mm, title)
+        c.setFont("Helvetica", 12)
         lines = desc.split("\n")
         for j, line in enumerate(lines):
-            c.drawCentredString(bx + obj_w / 2, y - 15 * mm - j * 10, line)
-        # Arrow between boxes
-        if i < 3:
-            arrow_x = bx + obj_w
-            arrow_y = y - obj_h / 2
-            c.setStrokeColor(C_TEXT)
-            c.setFillColor(C_TEXT)
-            c.setLineWidth(1.2)
-            c.line(arrow_x + 0.5 * mm, arrow_y, arrow_x + 3.5 * mm, arrow_y)
-            p = c.beginPath()
-            p.moveTo(arrow_x + 4 * mm, arrow_y)
-            p.lineTo(arrow_x + 2.5 * mm, arrow_y + 1.5 * mm)
-            p.lineTo(arrow_x + 2.5 * mm, arrow_y - 1.5 * mm)
-            p.close()
-            c.drawPath(p, fill=1, stroke=0)
-    y -= obj_h + 3 * mm
+            c.drawCentredString(bx + obj_w / 2, by_box + obj_h - 14 * mm - j * 12, line)
+    y -= 2 * (obj_h + grid_gap) + 2 * mm
 
     dy = draw_para(c, "<b>Three public datasets:</b>",
                    x, y, w, S_BODY_L)
@@ -543,8 +530,8 @@ def panel_method(c):
 
     box_w = w - 4 * mm
     box_h = 16 * mm
-    sub_h = 10 * mm
-    arrow_gap = 5 * mm
+    sub_h = 14 * mm
+    arrow_gap = 4 * mm
     box_x = x + (w - box_w) / 2
 
     for i, (label, color) in enumerate(stages):
@@ -705,24 +692,24 @@ def panel_classification(c, model_img, perclass_img):
               x, y - 3 * mm, w, sty_hl)
     y -= highlight_h + 3 * mm
 
-    # Model comparison CHART (replaces table)
+    # Model comparison CHART
     if model_img:
-        img_w = w
+        img_w = w + 2 * mm
         img_h = img_w * 0.54
-        c.drawImage(model_img, x, y - img_h,
+        c.drawImage(model_img, x - 1 * mm, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 2 * mm
 
-    # Per-class CHART (replaces table)
+    # Per-class CHART
     if perclass_img:
-        img_w = w * 0.85
+        img_w = w * 0.92
         img_h = img_w * 0.60
         offset_x = x + (w - img_w) / 2
         c.drawImage(perclass_img, offset_x, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
-        y -= img_h + 3 * mm
+        y -= img_h + 2 * mm
 
     # Analysis (concise, 3 key points)
     analyses = [
@@ -745,11 +732,11 @@ def panel_classification(c, model_img, perclass_img):
 def panel_interpretability(c, shap_img, actin_img):
     x, y, w = _panel_chrome(c, 1, 1, "5. Interpretability & Physics")
 
-    # SHAP chart
+    # SHAP chart (enlarged)
     if shap_img:
-        img_w = w
-        img_h = img_w * 0.50
-        c.drawImage(shap_img, x, y - img_h,
+        img_w = w + 2 * mm
+        img_h = img_w * 0.56
+        c.drawImage(shap_img, x - 1 * mm, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 3 * mm
@@ -768,11 +755,11 @@ def panel_interpretability(c, shap_img, actin_img):
     draw_para(c, finding, x + 1 * mm, y - 2 * mm, w - 4 * mm, S_SMALL_L)
     y -= box_h + 3 * mm
 
-    # Actinometry CHART (replaces text)
+    # Actinometry CHART (enlarged)
     if actin_img:
-        img_w = w
-        img_h = img_w * 0.46
-        c.drawImage(actin_img, x, y - img_h,
+        img_w = w + 2 * mm
+        img_h = img_w * 0.50
+        c.drawImage(actin_img, x - 1 * mm, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 3 * mm
@@ -799,17 +786,12 @@ def panel_conclusions(c):
     y -= dy + 2 * mm
 
     achievements = [
-        "Automated species detection: 13 plasma species, 39 NIST emission lines, "
-        "NMF decomposition validates against database",
-        "94.2% plasma state classification (SVM/RF best; CNN 93.2%, "
-        "Transformer 92.5% \u2014 6 models compared)",
-        "SHAP interpretability: F I importance = 0.131 (3x next species), "
-        "physically validated as primary SF6 etchant radical",
-        "Data-driven label correction: gas-flow labels (74%) \u2192 RF-power "
-        "labels (94%) via root-cause spectral analysis",
-        "Temperature regression: T_rot RMSE = 20.0 K, "
-        "T_vib = 102.0 K (Mesbah CAP dataset)",
-        "78 automated tests, 6 CLI task modes, fully reproducible pipeline",
+        "<b>94.2%</b> plasma state classification (6 models compared)",
+        "<b>13 species</b> auto-detected via NMF + NIST (39 lines)",
+        "<b>SHAP:</b> F I = 0.131 importance (primary etchant, validated)",
+        "<b>Label correction:</b> 74% &rarr; 94% via root-cause analysis",
+        "<b>T_rot = 20.0 K, T_vib = 102.0 K</b> (CAP regression)",
+        "<b>78 tests,</b> 6 CLI modes, fully reproducible",
     ]
     for a in achievements:
         dy = draw_para(c, f"&#10003;&nbsp; {a}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
@@ -851,18 +833,18 @@ def panel_conclusions(c):
         "78 automated tests | 32 development stories | 23 literature references | "
         "6 CLI task modes | 3 public datasets"
     )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 20, C_TEXT, leading=24))
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 17, C_TEXT, leading=20))
     _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = mh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
     draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 20, C_TEXT, leading=24))
+              _sty("met_box", 17, C_TEXT, leading=20))
     y -= box_h + 3 * mm
 
     y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
-                   _sty("refs_hdr", 22, C_NAV, bold=True))
+                   _sty("refs_hdr", 19, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     refs = [
@@ -873,7 +855,7 @@ def panel_conclusions(c):
         "[5] BOSCH dataset: Zenodo #17122442",
     ]
     for ref in refs:
-        dy = draw_para(c, ref, x + 1 * mm, y, w - 2 * mm, S_REF)
+        dy = draw_para(c, ref, x + 1 * mm, y, w - 2 * mm, _sty("ref_item", 15, C_TEXT, leading=18))
         y -= dy + 1 * mm
 
 
