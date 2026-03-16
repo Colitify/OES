@@ -106,6 +106,10 @@ S_TABLE = _sty("table", 17, leading=20)
 S_REF = _sty("ref", 16, leading=19)
 S_CAP = _sty("cap", 16, C_SUB, align=TA_CENTER)
 
+# +3pt variants for Panels 1, 3, 4, 5
+S_BODY_L = _sty("body_l", 21, leading=25)
+S_SMALL_L = _sty("small_l", 20, leading=24)
+
 
 def draw_para(c, text, x, y, w, style):
     p = Paragraph(text, style)
@@ -443,13 +447,13 @@ def panel_intro(c, spectrum_img):
         "relies on OES for process monitoring, but manual spectral "
         "interpretation is slow and error-prone."
     )
-    dy = draw_para(c, intro_text, x, y, w, S_BODY)
+    dy = draw_para(c, intro_text, x, y, w, S_BODY_L)
     y -= dy + 3 * mm
 
     dy = draw_para(c,
         "This project develops an <b>automated ML pipeline</b> for plasma "
         "OES analysis targeting four objectives:",
-        x, y, w, S_BODY)
+        x, y, w, S_BODY_L)
     y -= dy + 3 * mm
 
     # 4 numbered aims
@@ -465,7 +469,7 @@ def panel_intro(c, spectrum_img):
     ]
     for i, aim in enumerate(aims):
         bullet = f"<b>{i+1}.</b>&nbsp; {aim}"
-        dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_SMALL)
+        dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_SMALL_L)
         y -= dy + 2 * mm
 
     y -= 2 * mm
@@ -473,11 +477,11 @@ def panel_intro(c, spectrum_img):
         "<b>Industrial relevance:</b> Enables real-time closed-loop control of "
         "plasma processes in semiconductor fabrication, reducing defect rates "
         "and improving yield.",
-        x, y, w, S_SMALL)
+        x, y, w, S_SMALL_L)
     y -= dy + 3 * mm
 
     dy = draw_para(c, "<b>Three public datasets:</b>",
-                   x, y, w, S_BODY)
+                   x, y, w, S_BODY_L)
     y -= dy + 2 * mm
 
     # Dataset table
@@ -593,7 +597,7 @@ def panel_method(c):
         "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
         "11-channel local window)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 17, C_TEXT, leading=18))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 20, C_TEXT, leading=24))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -625,7 +629,7 @@ def panel_species(c, species_img):
         "concentrations. NMF is physically appropriate because emission "
         "intensities are inherently non-negative."
     )
-    dy = draw_para(c, intro, x, y, w, S_SMALL)
+    dy = draw_para(c, intro, x, y, w, S_SMALL_L)
     y -= dy + 2 * mm
 
     dy = draw_para(c,
@@ -634,7 +638,7 @@ def panel_species(c, species_img):
         "closest database match within +/-1.5 nm tolerance. Species with "
         "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
         "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 17, C_TEXT, leading=18))
+        x, y, w, _sty("nist_detail", 20, C_TEXT, leading=24))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -667,7 +671,7 @@ def panel_species(c, species_img):
         "(approx. C2 Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 17, C_SUB, leading=18))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 20, C_SUB, leading=24))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -716,7 +720,7 @@ def panel_classification(c, model_img, perclass_img):
         "C2 only during C4F8 passivation steps.",
     ]
     for a in analyses:
-        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm, S_SMALL)
+        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm, S_SMALL_L)
         y -= dy + 1.5 * mm
 
 
@@ -742,12 +746,12 @@ def panel_interpretability(c, shap_img, actin_img):
         "&lt; 0.35\u03c3 (indistinguishable). RF power ON/OFF provides "
         "0.56\u03c3 separation. Classification: 74% &rarr; <b>94%</b>."
     )
-    p_tmp = Paragraph(finding, S_SMALL)
+    p_tmp = Paragraph(finding, S_SMALL_L)
     _, fh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = fh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
-    draw_para(c, finding, x + 1 * mm, y - 2 * mm, w - 4 * mm, S_SMALL)
+    draw_para(c, finding, x + 1 * mm, y - 2 * mm, w - 4 * mm, S_SMALL_L)
     y -= box_h + 3 * mm
 
     # Actinometry CHART (replaces text)
@@ -766,7 +770,7 @@ def panel_interpretability(c, shap_img, actin_img):
         "DTW K-Means (k=4) discovers 4 discharge phases with "
         "F I 684 nm emission ratio <b>2.04x</b> between clusters."
     )
-    draw_para(c, boltz_temporal, x, y, w, S_SMALL)
+    draw_para(c, boltz_temporal, x, y, w, S_SMALL_L)
 
 
 # ══════════════════════════════════════════════════════════════════
