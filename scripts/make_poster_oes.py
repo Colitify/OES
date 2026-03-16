@@ -446,7 +446,7 @@ def _panel_chrome(c, col, row, title):
     c.setLineWidth(1.0)
     c.line(x + PAD, y + h - HEADER_H, x + w - PAD, y + h - HEADER_H)
 
-    return x + PAD, y + h - HEADER_H - 5 * mm, w - 2 * PAD
+    return x + PAD, y + h - HEADER_H - 7 * mm, w - 2 * PAD
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -546,8 +546,8 @@ def panel_method(c):
 
     box_w = w - 4 * mm
     box_h = 16 * mm
-    sub_h = 10 * mm
-    arrow_gap = 5 * mm
+    sub_h = 13 * mm
+    arrow_gap = 4 * mm
     box_x = x + (w - box_w) / 2
 
     for i, (label, color) in enumerate(stages):
@@ -566,7 +566,7 @@ def panel_method(c):
             rrect(c, box_x + 4 * mm, sub_y, box_w - 8 * mm, sub_h,
                   r=2 * mm, fill=lighter, stroke=color, stroke_width=0.8)
             # Wrap sub-label text
-            sub_style = _sty(f"sub_{i}", 16, C_TEXT, align=TA_CENTER, leading=15)
+            sub_style = _sty(f"sub_{i}", 16, C_TEXT, align=TA_CENTER, leading=21)
             draw_para(c, sub_labels[i],
                       box_x + 6 * mm, sub_y + sub_h - 2 * mm,
                       box_w - 12 * mm, sub_style)
@@ -581,7 +581,7 @@ def panel_method(c):
             y -= arrow_gap
 
     y -= 5 * mm
-    note_style = _sty("optuna_note", 19, C_SUB, leading=18)
+    note_style = _sty("optuna_note", 19, C_SUB, leading=24)
     draw_para(c,
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
@@ -591,7 +591,7 @@ def panel_method(c):
     # Key Design Decisions callout box
     kdd_title = "<b>Key Design Decisions</b>"
     dy = draw_para(c, kdd_title, x, y, w,
-                   _sty("kdd_t", 20, C_NAV, bold=True, leading=19))
+                   _sty("kdd_t", 20, C_NAV, bold=True, leading=25))
     y -= dy + 2 * mm
 
     decisions = [
@@ -609,7 +609,7 @@ def panel_method(c):
     ]
     for d in decisions:
         dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 19, C_TEXT, leading=18))
+                       _sty("kdd_item", 19, C_TEXT, leading=24))
         y -= dy + 2 * mm
 
     y -= 3 * mm
@@ -622,7 +622,7 @@ def panel_method(c):
         "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
         "11-channel local window)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 19, C_TEXT, leading=18))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 19, C_TEXT, leading=24))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -663,7 +663,7 @@ def panel_species(c, species_img):
         "closest database match within +/-1.5 nm tolerance. Species with "
         "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
         "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 19, C_TEXT, leading=18))
+        x, y, w, _sty("nist_detail", 19, C_TEXT, leading=24))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -696,7 +696,7 @@ def panel_species(c, species_img):
         "(approx. C2 Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 19, C_SUB, leading=18))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 19, C_SUB, leading=24))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -710,7 +710,7 @@ def panel_classification(c, model_comp_img, per_class_img):
     highlight_h = 14 * mm
     rrect(c, x - 2 * mm, y - highlight_h, w + 4 * mm, highlight_h,
           r=3 * mm, fill=C_HIGH_BG, stroke=C_UOL_RED, stroke_width=2.0)
-    sty_hl = _sty("highlight", 20, C_UOL_RED, bold=True, align=TA_CENTER, leading=18)
+    sty_hl = _sty("highlight", 20, C_UOL_RED, bold=True, align=TA_CENTER, leading=25)
     draw_para(c, "94.2% Accuracy (SVM/RF, 5-fold CV)", x, y - 3 * mm, w, sty_hl)
     y -= highlight_h + 3 * mm
 
@@ -875,13 +875,13 @@ def panel_conclusions(c):
         "78 automated tests | 32 development stories | 23 literature references | "
         "6 CLI task modes | 3 public datasets"
     )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 19, C_TEXT, leading=18))
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 19, C_TEXT, leading=24))
     _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = mh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
     draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 19, C_TEXT, leading=18))
+              _sty("met_box", 19, C_TEXT, leading=24))
     y -= box_h + 3 * mm
 
     y -= 4 * mm
@@ -911,8 +911,8 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     Returns total height consumed.
     """
     cw = [w * f for f in col_fracs]
-    hdr_h = 8 * mm
-    row_h = 7 * mm
+    hdr_h = 9 * mm
+    row_h = 8.5 * mm
 
     # Header row
     c.setFillColor(C_NAV)
