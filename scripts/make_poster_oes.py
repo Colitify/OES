@@ -504,13 +504,6 @@ def panel_intro(c, spectrum_img):
         y -= dy + 2 * mm
 
     y -= 2 * mm
-    dy = draw_para(c,
-        "<b>Industrial relevance:</b> Enables real-time closed-loop control of "
-        "plasma processes in semiconductor fabrication, reducing defect rates "
-        "and improving yield.",
-        x, y, w, S_SMALL)
-    y -= dy + 3 * mm
-
     dy = draw_para(c, "<b>Three public datasets:</b>",
                    x, y, w, S_BODY)
     y -= dy + 2 * mm
