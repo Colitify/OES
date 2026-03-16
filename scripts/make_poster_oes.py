@@ -100,11 +100,11 @@ def _sty(name, sz, color=C_TEXT, bold=False, align=TA_LEFT, leading=None):
     )
 
 
-S_BODY = _sty("body", 14, leading=18)
-S_SMALL = _sty("small", 13, leading=17)
-S_TABLE = _sty("table", 13, leading=16)
-S_REF = _sty("ref", 12, leading=15)
-S_CAP = _sty("cap", 12, C_SUB, align=TA_CENTER)
+S_BODY = _sty("body", 16, leading=20)
+S_SMALL = _sty("small", 15, leading=19)
+S_TABLE = _sty("table", 15, leading=18)
+S_REF = _sty("ref", 14, leading=17)
+S_CAP = _sty("cap", 14, C_SUB, align=TA_CENTER)
 
 
 def draw_para(c, text, x, y, w, style):
@@ -128,33 +128,29 @@ def load_uol_logo():
     """Load University of Liverpool logo as white silhouette on navy background.
 
     Composites the logo onto a navy (#1a3c5e) background with opaque pixels
-    rendered as white. This avoids alpha channel issues in reportlab.
+    rendered as white. Saves to a temp file to avoid BytesIO seek issues.
     """
     logo_path = Path(__file__).resolve().parent / "uol_logo_full.png"
     if logo_path.exists():
         from PIL import Image
+        import tempfile
         img = Image.open(logo_path).convert("RGBA")
         data = np.array(img)
 
-        # Create navy background (RGB matching the banner)
-        navy_bg = np.zeros_like(data)
-        navy_bg[:, :, 0] = 0x1a  # R
-        navy_bg[:, :, 1] = 0x3c  # G
-        navy_bg[:, :, 2] = 0x5e  # B
-        navy_bg[:, :, 3] = 255   # fully opaque
-
-        # Make logo pixels white where the original has content
+        # Composite: white logo content on navy background
         alpha = data[:, :, 3].astype(np.float32) / 255.0
+        result = np.zeros((data.shape[0], data.shape[1], 3), dtype=np.uint8)
+        navy = [0x1a, 0x3c, 0x5e]
         for ch in range(3):
-            navy_bg[:, :, ch] = (
-                alpha * 255 + (1 - alpha) * navy_bg[:, :, ch]
+            result[:, :, ch] = (
+                alpha * 255 + (1 - alpha) * navy[ch]
             ).astype(np.uint8)
 
-        img_out = Image.fromarray(navy_bg).convert("RGB")
-        buf = io.BytesIO()
-        img_out.save(buf, format="PNG")
-        buf.seek(0)
-        return ImageReader(buf)
+        img_out = Image.fromarray(result, "RGB")
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        img_out.save(tmp.name, format="PNG")
+        tmp.close()
+        return tmp.name  # return file path, not ImageReader
     return None
 
 
@@ -279,8 +275,7 @@ def draw_banner(c, logo_img):
         logo_w = logo_h * (1024 / 261)  # original aspect ratio
         logo_x = bx + 6 * mm
         logo_y = by + (BANNER_H - logo_h) / 2 + 2 * mm
-        c.drawImage(logo_img, logo_x, logo_y, width=logo_w, height=logo_h,
-                    preserveAspectRatio=True)
+        c.drawImage(logo_img, logo_x, logo_y, width=logo_w, height=logo_h)
         title_x = logo_x + logo_w + 6 * mm
     else:
         c.setFillColor(white)
@@ -460,7 +455,7 @@ def panel_method(c):
             rrect(c, box_x + 4 * mm, sub_y, box_w - 8 * mm, sub_h,
                   r=2 * mm, fill=lighter, stroke=color, stroke_width=0.8)
             # Wrap sub-label text
-            sub_style = _sty(f"sub_{i}", 10, C_TEXT, align=TA_CENTER, leading=13)
+            sub_style = _sty(f"sub_{i}", 12, C_TEXT, align=TA_CENTER, leading=15)
             draw_para(c, sub_labels[i],
                       box_x + 6 * mm, sub_y + sub_h - 2 * mm,
                       box_w - 12 * mm, sub_style)
@@ -475,7 +470,7 @@ def panel_method(c):
             y -= arrow_gap
 
     y -= 5 * mm
-    note_style = _sty("optuna_note", 13, C_SUB, leading=16)
+    note_style = _sty("optuna_note", 15, C_SUB, leading=18)
     draw_para(c,
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
@@ -485,7 +480,7 @@ def panel_method(c):
     # Key Design Decisions callout box
     kdd_title = "<b>Key Design Decisions</b>"
     dy = draw_para(c, kdd_title, x, y, w,
-                   _sty("kdd_t", 14, C_NAV, bold=True, leading=17))
+                   _sty("kdd_t", 16, C_NAV, bold=True, leading=19))
     y -= dy + 2 * mm
 
     decisions = [
@@ -503,7 +498,7 @@ def panel_method(c):
     ]
     for d in decisions:
         dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 13, C_TEXT, leading=16))
+                       _sty("kdd_item", 15, C_TEXT, leading=18))
         y -= dy + 2 * mm
 
     y -= 3 * mm
@@ -516,7 +511,7 @@ def panel_method(c):
         "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
         "11-channel local window)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 13, C_TEXT, leading=16))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 15, C_TEXT, leading=18))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -557,7 +552,7 @@ def panel_species(c, species_img):
         "closest database match within +/-1.5 nm tolerance. Species with "
         "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
         "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 13, C_TEXT, leading=16))
+        x, y, w, _sty("nist_detail", 15, C_TEXT, leading=18))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -590,7 +585,7 @@ def panel_species(c, species_img):
         "(approx. C<sub>2</sub> Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 13, C_SUB, leading=16))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 15, C_SUB, leading=18))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -604,7 +599,7 @@ def panel_classification(c):
     highlight_h = 14 * mm
     rrect(c, x - 2 * mm, y - highlight_h, w + 4 * mm, highlight_h,
           r=3 * mm, fill=C_HIGH_BG, stroke=C_UOL_RED, stroke_width=2.0)
-    sty_hl = _sty("highlight", 14, C_UOL_RED, bold=True, align=TA_CENTER,
+    sty_hl = _sty("highlight", 16, C_UOL_RED, bold=True, align=TA_CENTER,
                    leading=18)
     draw_para(c, "94.2% Accuracy (SVM/RF, 5-fold CV)",
               x, y - 3 * mm, w, sty_hl)
@@ -635,7 +630,7 @@ def panel_classification(c):
 
     # Per-species detection rates table
     dy = draw_para(c, "<b>Species Detection Rates (13 species, 15,000 spectra):</b>",
-                   x, y, w, _sty("sp_hdr", 14, C_NAV, bold=True))
+                   x, y, w, _sty("sp_hdr", 16, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     dy = _draw_simple_table(c, x, y, w,
@@ -650,7 +645,7 @@ def panel_classification(c):
 
     # Model architecture details
     dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
-                   _sty("arch_h", 14, C_NAV, bold=True))
+                   _sty("arch_h", 16, C_NAV, bold=True))
     y -= dy + 1.5 * mm
 
     archs = [
@@ -666,7 +661,7 @@ def panel_classification(c):
     ]
     for a in archs:
         dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("arch_item", 12, C_TEXT, leading=15))
+                       _sty("arch_item", 14, C_TEXT, leading=17))
         y -= dy + 1.5 * mm
 
     note = (
@@ -734,7 +729,7 @@ def panel_interpretability(c, shap_img):
         "and is well-separated from neighbouring lines. Its intensity directly tracks "
         "F radical density, making it the most sensitive probe of etch chemistry."
     )
-    dy = draw_para(c, fi_physics, x, y, w, _sty("fi_phys", 13, C_TEXT, leading=17))
+    dy = draw_para(c, fi_physics, x, y, w, _sty("fi_phys", 15, C_TEXT, leading=19))
     y -= dy + 3 * mm
 
     # Actinometry explanation
@@ -770,7 +765,7 @@ def panel_conclusions(c):
     x, y, w = _panel_chrome(c, 2, 1, "6. Conclusions & Further Work")
 
     dy = draw_para(c, "<b>Key Achievements:</b>", x, y, w,
-                   _sty("ka", 14, C_NAV, bold=True))
+                   _sty("ka", 16, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     achievements = [
@@ -792,7 +787,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Limitations:</b>", x, y, w,
-                   _sty("lim", 14, C_NAV, bold=True))
+                   _sty("lim", 16, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     limitations = [
@@ -806,7 +801,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Further Work:</b>", x, y, w,
-                   _sty("fw", 14, C_NAV, bold=True))
+                   _sty("fw", 16, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     further = [
@@ -826,18 +821,18 @@ def panel_conclusions(c):
         "78 automated tests | 32 development stories | 23 literature references | "
         "6 CLI task modes | 3 public datasets"
     )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 13, C_TEXT, leading=16))
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 15, C_TEXT, leading=18))
     _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = mh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
     draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 13, C_TEXT, leading=16))
+              _sty("met_box", 15, C_TEXT, leading=18))
     y -= box_h + 3 * mm
 
     y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
-                   _sty("refs_hdr", 14, C_NAV, bold=True))
+                   _sty("refs_hdr", 16, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     refs = [
@@ -869,7 +864,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     c.setFillColor(C_NAV)
     c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont("Helvetica-Bold", 13)
     cx = x
     for j, hdr in enumerate(headers):
         c.drawCentredString(cx + cw[j] / 2, y - hdr_h + 2.5 * mm, hdr)
@@ -883,7 +878,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
         c.rect(x, ry, w, row_h, fill=1, stroke=0)
         cx = x
         for j, cell in enumerate(row):
-            c.setFont("Helvetica", 12)
+            c.setFont("Helvetica", 13)
             c.setFillColor(C_TEXT)
             c.drawCentredString(cx + cw[j] / 2, ry + 2 * mm, cell)
             cx += cw[j]
