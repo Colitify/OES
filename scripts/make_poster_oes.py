@@ -58,7 +58,8 @@ CONTENT_W = PAGE_W - 2 * MARGIN
 CONTENT_H = CONTENT_TOP - CONTENT_BOT
 
 COL_W = (CONTENT_W - 2 * COL_GAP) / 3
-ROW_H = (CONTENT_H - ROW_GAP) / 2
+ROW1_H = CONTENT_H * 0.50
+ROW2_H = CONTENT_H - ROW1_H - ROW_GAP
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -69,8 +70,12 @@ def col_x(i):
 def row_y(j):
     """Return bottom-y of row j (0=top row, 1=bottom row)."""
     if j == 0:
-        return CONTENT_TOP - ROW_H
+        return CONTENT_TOP - ROW1_H
     return CONTENT_BOT
+
+
+def row_h(j):
+    return ROW1_H if j == 0 else ROW2_H
 
 
 def rrect(c, x, y, w, h, r=RAD, fill=None, stroke=None, stroke_width=None):
@@ -163,16 +168,17 @@ def make_species_chart():
     rates = [0.7, 20.8, 23.8, 68.4, 69.8]
     colors = [H_NAV, H_NAV, H_NAV, H_BLUE, H_BLUE]
 
-    fig, ax = plt.subplots(figsize=(4.5, 2.2))
-    bars = ax.barh(species, rates, color=colors, height=0.6, edgecolor="white")
+    fig, ax = plt.subplots(figsize=(5.0, 2.8))
+    bars = ax.barh(species, rates, color=colors, height=0.55, edgecolor="white")
     for bar, val in zip(bars, rates):
         ax.text(bar.get_width() + 1.0, bar.get_y() + bar.get_height() / 2,
-                f"{val}%", va="center", fontsize=9, fontweight="bold",
+                f"{val}%", va="center", fontsize=10, fontweight="bold",
                 color=H_NAV)
     ax.set_xlim(0, 85)
-    ax.set_xlabel("Detection Rate (%)", fontsize=10)
-    ax.set_title("Species Detection Rate (15,000 spectra)", fontsize=11)
-    ax.tick_params(labelsize=9)
+    ax.set_xlabel("Detection Rate (%)", fontsize=11)
+    ax.set_title("Species Detection Rate (15,000 spectra)", fontsize=12,
+                 fontweight="bold")
+    ax.tick_params(labelsize=10)
     fig.tight_layout()
     return fig_to_image(fig)
 
@@ -184,16 +190,16 @@ def make_shap_chart():
     values = [0.033, 0.040, 0.041, 0.046, 0.131]
     colors = [H_NAV] * 5
 
-    fig, ax = plt.subplots(figsize=(4.5, 2.2))
-    bars = ax.barh(features, values, color=colors, height=0.6, edgecolor="white")
+    fig, ax = plt.subplots(figsize=(5.0, 2.8))
+    bars = ax.barh(features, values, color=colors, height=0.55, edgecolor="white")
     for bar, val in zip(bars, values):
         ax.text(bar.get_width() + 0.002, bar.get_y() + bar.get_height() / 2,
-                f"{val:.3f}", va="center", fontsize=9, fontweight="bold",
+                f"{val:.3f}", va="center", fontsize=10, fontweight="bold",
                 color=H_NAV)
     ax.set_xlim(0, 0.17)
-    ax.set_xlabel("Mean |SHAP value|", fontsize=10)
-    ax.set_title("SHAP Feature Importance (RF)", fontsize=11)
-    ax.tick_params(labelsize=9)
+    ax.set_xlabel("Mean |SHAP value|", fontsize=11)
+    ax.set_title("SHAP Feature Importance (RF)", fontsize=12, fontweight="bold")
+    ax.tick_params(labelsize=10)
     fig.tight_layout()
     return fig_to_image(fig)
 
@@ -260,7 +266,7 @@ def _panel_chrome(c, col, row, title):
     x = col_x(col)
     y = row_y(row)
     w = COL_W
-    h = ROW_H
+    h = row_h(row)
 
     # White panel with navy border, rounded corners
     rrect(c, x, y, w, h, r=RAD, fill=C_PANEL, stroke=C_BORDER,
@@ -287,39 +293,58 @@ def panel_intro(c):
     x, y, w = _panel_chrome(c, 0, 0, "1. Introduction")
 
     intro_text = (
-        "Optical Emission Spectroscopy (OES) provides non-invasive, real-time "
-        "diagnostics of plasma processes by analysing emission spectra from "
-        "excited species. This project develops an automated ML pipeline for "
-        "plasma OES analysis targeting four objectives:"
+        "Optical Emission Spectroscopy (OES) provides <b>non-invasive, "
+        "real-time diagnostics</b> of plasma processes by analysing "
+        "emission spectra from excited species. Plasma-based manufacturing "
+        "(semiconductor etching, surface treatment, thin-film deposition) "
+        "relies on OES for process monitoring, but manual spectral "
+        "interpretation is slow and error-prone."
     )
     dy = draw_para(c, intro_text, x, y, w, S_BODY)
-    y -= dy + 4 * mm
+    y -= dy + 3 * mm
+
+    dy = draw_para(c,
+        "This project develops an <b>automated ML pipeline</b> for plasma "
+        "OES analysis targeting four objectives:",
+        x, y, w, S_BODY)
+    y -= dy + 3 * mm
 
     # 4 numbered aims
     aims = [
-        "Spectral feature identification (automated peak detection + NMF decomposition)",
-        "Plasma species classification (SVM, RF, CNN, Transformer comparison)",
-        "Spatiotemporal evolution analysis (Attention-LSTM phase prediction)",
-        "Semi-quantitative intensity analysis (actinometry, Boltzmann T<sub>e</sub>)",
+        "<b>Spectral feature identification</b> \u2014 automated peak detection, "
+        "NMF decomposition, NIST database matching",
+        "<b>Plasma species classification</b> \u2014 SVM, RF, CNN, Transformer "
+        "comparison (6 models)",
+        "<b>Spatiotemporal evolution</b> \u2014 Attention-LSTM phase prediction, "
+        "species time-series extraction",
+        "<b>Semi-quantitative intensity</b> \u2014 actinometry (Coburn &amp; Chen 1980), "
+        "Boltzmann T<sub>e</sub> estimation",
     ]
     for i, aim in enumerate(aims):
         bullet = f"<b>{i+1}.</b>&nbsp; {aim}"
-        dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_BODY)
+        dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_SMALL)
         y -= dy + 2 * mm
 
-    y -= 3 * mm
-    dy = draw_para(c, "Three public datasets spanning different plasma configurations:",
-                   x, y, w, S_BODY)
+    y -= 2 * mm
+    dy = draw_para(c,
+        "<b>Industrial relevance:</b> Enables real-time closed-loop control of "
+        "plasma processes in semiconductor fabrication, reducing defect rates "
+        "and improving yield.",
+        x, y, w, S_SMALL)
     y -= dy + 3 * mm
+
+    dy = draw_para(c, "<b>Three public datasets:</b>",
+                   x, y, w, S_BODY)
+    y -= dy + 2 * mm
 
     # Dataset table
     _draw_simple_table(c, x, y, w,
                        headers=["Dataset", "Channels", "Notes"],
-                       col_fracs=[0.35, 0.22, 0.43],
+                       col_fracs=[0.32, 0.20, 0.48],
                        rows=[
-                           ["LIBS Benchmark", "40,002 ch", "Steel composition"],
-                           ["Mesbah CAP", "51 ch", "N2 plasma T_rot/T_vib"],
-                           ["BOSCH RIE", "3,648 ch", "25 Hz etch monitoring"],
+                           ["LIBS Benchmark", "40,002 ch", "Steel composition (12 classes)"],
+                           ["Mesbah CAP", "51 ch", "N2 plasma T_rot / T_vib"],
+                           ["BOSCH RIE", "3,648 ch", "25 Hz, 10 days, SF6/C4F8"],
                        ])
 
 
@@ -422,7 +447,7 @@ def panel_species(c, species_img):
     # Species detection chart
     if species_img:
         img_w = w
-        img_h = img_w * 0.49
+        img_h = img_w * 0.56
         c.drawImage(species_img, x, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
@@ -480,12 +505,26 @@ def panel_classification(c):
                             ])
     y -= dy + 4 * mm
 
+    # Per-species detection rates table
+    dy = draw_para(c, "<b>Species Detection Rates (13 species, 15,000 spectra):</b>",
+                   x, y, w, _sty("sp_hdr", 10, C_NAV, bold=True))
+    y -= dy + 2 * mm
+
+    dy = _draw_simple_table(c, x, y, w,
+                            headers=["Species", "Detection", "Species", "Detection"],
+                            col_fracs=[0.24, 0.26, 0.24, 0.26],
+                            rows=[
+                                ["Ar I", "69.8%", "C2 Swan", "23.8%"],
+                                ["F I", "68.4%", "CO", "20.8%"],
+                                ["N2 2pos", "0.7%", "Si I", "0.4%"],
+                            ])
+    y -= dy + 3 * mm
+
     note = (
-        "<i>Labels derived from RF source power (plasma ON/OFF). "
-        "Traditional ML outperforms deep learning due to near-linear "
-        "decision boundary and limited training data (15,000 samples).</i>"
+        "<i>Labels: RF source power (plasma ON/OFF). Traditional ML "
+        "outperforms DL due to near-linear boundary &amp; limited data.</i>"
     )
-    draw_para(c, note, x, y, w, S_SMALL)
+    draw_para(c, note, x, y, w, S_REF)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -498,7 +537,7 @@ def panel_interpretability(c, shap_img):
     # SHAP chart
     if shap_img:
         img_w = w
-        img_h = img_w * 0.49
+        img_h = img_w * 0.56
         c.drawImage(shap_img, x, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
