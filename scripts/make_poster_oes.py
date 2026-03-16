@@ -100,11 +100,11 @@ def _sty(name, sz, color=C_TEXT, bold=False, align=TA_LEFT, leading=None):
     )
 
 
-S_BODY = _sty("body", 28, leading=34)
-S_SMALL = _sty("small", 26, leading=32)
-S_TABLE = _sty("table", 26, leading=30)
-S_REF = _sty("ref", 24, leading=28)
-S_CAP = _sty("cap", 24, C_SUB, align=TA_CENTER)
+S_BODY = _sty("body", 24, leading=30)
+S_SMALL = _sty("small", 22, leading=28)
+S_TABLE = _sty("table", 22, leading=26)
+S_REF = _sty("ref", 20, leading=25)
+S_CAP = _sty("cap", 20, C_SUB, align=TA_CENTER)
 
 
 def draw_para(c, text, x, y, w, style):
@@ -580,7 +580,7 @@ def panel_method(c):
             rrect(c, box_x + 4 * mm, sub_y, box_w - 8 * mm, sub_h,
                   r=2 * mm, fill=lighter, stroke=color, stroke_width=0.8)
             # Wrap sub-label text
-            sub_style = _sty(f"sub_{i}", 20, C_TEXT, align=TA_CENTER, leading=24)
+            sub_style = _sty(f"sub_{i}", 14, C_TEXT, align=TA_CENTER, leading=18)
             draw_para(c, sub_labels[i],
                       box_x + 6 * mm, sub_y + sub_h - 2 * mm,
                       box_w - 12 * mm, sub_style)
@@ -595,7 +595,7 @@ def panel_method(c):
             y -= arrow_gap
 
     y -= 5 * mm
-    note_style = _sty("optuna_note", 26, C_SUB, leading=32)
+    note_style = _sty("optuna_note", 22, C_SUB, leading=28)
     draw_para(c,
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
@@ -605,25 +605,18 @@ def panel_method(c):
     # Key Design Decisions callout box
     kdd_title = "<b>Key Design Decisions</b>"
     dy = draw_para(c, kdd_title, x, y, w,
-                   _sty("kdd_t", 28, C_NAV, bold=True, leading=34))
+                   _sty("kdd_t", 24, C_NAV, bold=True, leading=30))
     y -= dy + 2 * mm
 
     decisions = [
-        "<b>Per-element model routing:</b> Different plasma species require "
-        "different model architectures. Cr uses Ridge+PCA (avoids overfitting "
-        "on 976 NIST lines); other elements use ANN+NIST windows.",
-        "<b>GroupKFold CV:</b> Prevents same-target spectra leaking between "
-        "train/test folds. Forces model to generalise across physical samples, "
-        "not memorise measurement noise.",
-        "<b>Balanced class weights:</b> Plasma OFF samples are only 12.1% of "
-        "data. Class-weighted loss prevents majority-class bias in all classifiers.",
-        "<b>NMF over PCA:</b> Non-negative components are physically interpretable "
-        "as pure-species emission spectra. PCA components can be negative, "
-        "violating emission physics.",
+        "<b>Per-element routing:</b> Cr uses Ridge+PCA; others use ANN+NIST.",
+        "<b>GroupKFold CV:</b> Prevents same-target leakage across folds.",
+        "<b>Balanced weights:</b> Compensates 12.1% minority class (OFF).",
+        "<b>NMF over PCA:</b> Non-negative = physically interpretable spectra.",
     ]
     for d in decisions:
         dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 26, C_TEXT, leading=32))
+                       _sty("kdd_item", 22, C_TEXT, leading=28))
         y -= dy + 2 * mm
 
     y -= 3 * mm
@@ -633,7 +626,7 @@ def panel_method(c):
         "ALS baseline &rarr; SavGol smoothing &rarr; SNV normalisation. "
         "Average SNR gain: <b>10.99 dB</b> (12.6x improvement)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 26, C_TEXT, leading=32))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 22, C_TEXT, leading=28))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -669,12 +662,10 @@ def panel_species(c, species_img):
     y -= dy + 2 * mm
 
     dy = draw_para(c,
-        "<b>Automated NIST matching:</b> Each detected peak is compared against "
-        "39 reference emission lines from 13 species. The algorithm selects the "
-        "closest database match within +/-1.5 nm tolerance. Species with "
-        "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
-        "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 26, C_TEXT, leading=32))
+        "<b>NIST matching:</b> 39 reference lines, 13 species, "
+        "+/-1.5 nm tolerance. Detection threshold: peak &gt; "
+        "mean + 3 std.",
+        x, y, w, _sty("nist_detail", 22, C_TEXT, leading=28))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -707,7 +698,7 @@ def panel_species(c, species_img):
         "(approx. C2 Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 26, C_SUB, leading=32))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 22, C_SUB, leading=28))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -721,7 +712,7 @@ def panel_classification(c, model_comp_img, confusion_img):
     highlight_h = 14 * mm
     rrect(c, x - 2 * mm, y - highlight_h, w + 4 * mm, highlight_h,
           r=3 * mm, fill=C_HIGH_BG, stroke=C_UOL_RED, stroke_width=2.0)
-    sty_hl = _sty("highlight", 28, C_UOL_RED, bold=True, align=TA_CENTER, leading=34)
+    sty_hl = _sty("highlight", 24, C_UOL_RED, bold=True, align=TA_CENTER, leading=30)
     draw_para(c, "94.2% Accuracy (SVM/RF, 5-fold CV)", x, y - 3 * mm, w, sty_hl)
     y -= highlight_h + 3 * mm
 
@@ -744,7 +735,7 @@ def panel_classification(c, model_comp_img, confusion_img):
 
     # Species detection table (keep as table - compact)
     dy = draw_para(c, "<b>Species Detection (13 species):</b>",
-                   x, y, w, _sty("sp_hdr", 24, C_NAV, bold=True))
+                   x, y, w, _sty("sp_hdr", 22, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     dy = _draw_simple_table(c, x, y, w,
@@ -758,7 +749,7 @@ def panel_classification(c, model_comp_img, confusion_img):
 
     # Model architectures (compact)
     dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
-                   _sty("arch_h2", 24, C_NAV, bold=True))
+                   _sty("arch_h2", 22, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     archs = [
@@ -830,21 +821,16 @@ def panel_conclusions(c):
     x, y, w = _panel_chrome(c, 2, 1, "6. Conclusions & Further Work")
 
     dy = draw_para(c, "<b>Key Achievements:</b>", x, y, w,
-                   _sty("ka", 28, C_NAV, bold=True))
+                   _sty("ka", 24, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     achievements = [
-        "Automated species detection: 13 plasma species, 39 NIST emission lines, "
-        "NMF decomposition validates against database",
-        "94.2% plasma state classification (SVM/RF best; CNN 93.2%, "
-        "Transformer 92.5% \u2014 6 models compared)",
-        "SHAP interpretability: F I importance = 0.131 (3x next species), "
-        "physically validated as primary SF6 etchant radical",
-        "Data-driven label correction: gas-flow labels (74%) \u2192 RF-power "
-        "labels (94%) via root-cause spectral analysis",
-        "Temperature regression: T_rot RMSE = 20.0 K, "
-        "T_vib = 102.0 K (Mesbah CAP dataset)",
-        "78 automated tests, 6 CLI task modes, fully reproducible pipeline",
+        "13 species detected, 39 NIST lines, NMF validated",
+        "94.2% classification (6 models compared)",
+        "SHAP: F I = 0.131 (physically validated etchant)",
+        "Label correction: 74% &rarr; 94% via root-cause analysis",
+        "T_rot = 20.0 K, T_vib = 102.0 K (CAP regression)",
+        "78 tests, 6 CLI modes, fully reproducible",
     ]
     for a in achievements:
         dy = draw_para(c, f"&#10003;&nbsp; {a}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
@@ -852,7 +838,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Limitations:</b>", x, y, w,
-                   _sty("lim", 28, C_NAV, bold=True))
+                   _sty("lim", 24, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     limitations = [
@@ -866,7 +852,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Further Work:</b>", x, y, w,
-                   _sty("fw", 28, C_NAV, bold=True))
+                   _sty("fw", 24, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     further = [
@@ -886,18 +872,18 @@ def panel_conclusions(c):
         "78 automated tests | 32 development stories | 23 literature references | "
         "6 CLI task modes | 3 public datasets"
     )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 26, C_TEXT, leading=32))
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 22, C_TEXT, leading=28))
     _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = mh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
     draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 26, C_TEXT, leading=32))
+              _sty("met_box", 22, C_TEXT, leading=28))
     y -= box_h + 3 * mm
 
     y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
-                   _sty("refs_hdr", 28, C_NAV, bold=True))
+                   _sty("refs_hdr", 24, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     refs = [
@@ -922,14 +908,14 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     Returns total height consumed.
     """
     cw = [w * f for f in col_fracs]
-    hdr_h = 12 * mm
-    row_h = 11 * mm
+    hdr_h = 10 * mm
+    row_h = 9 * mm
 
     # Header row
     c.setFillColor(C_NAV)
     c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 22)
+    c.setFont("Helvetica-Bold", 18)
     cx = x
     for j, hdr in enumerate(headers):
         c.drawCentredString(cx + cw[j] / 2, y - hdr_h + 2.5 * mm, hdr)
@@ -943,7 +929,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
         c.rect(x, ry, w, row_h, fill=1, stroke=0)
         cx = x
         for j, cell in enumerate(row):
-            c.setFont("Helvetica", 20)
+            c.setFont("Helvetica", 16)
             c.setFillColor(C_TEXT)
             c.drawCentredString(cx + cw[j] / 2, ry + 2 * mm, cell)
             cx += cw[j]
