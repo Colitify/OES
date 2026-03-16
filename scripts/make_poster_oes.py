@@ -567,29 +567,21 @@ def panel_method(c):
               x, y, w, note_style)
     y -= 16 * mm
 
-    # Key Design Decisions callout box
-    kdd_title = "<b>Key Design Decisions</b>"
-    dy = draw_para(c, kdd_title, x, y, w,
+    # Key Design Decisions table
+    dy = draw_para(c, "<b>Key Design Decisions</b>", x, y, w,
                    _sty("kdd_t", 18, C_NAV, bold=True, leading=19))
     y -= dy + 2 * mm
 
-    decisions = [
-        "<b>Per-element model routing:</b> Different plasma species require "
-        "different model architectures. Cr uses Ridge+PCA (avoids overfitting "
-        "on 976 NIST lines); other elements use ANN+NIST windows.",
-        "<b>GroupKFold CV:</b> Prevents same-target spectra leaking between "
-        "train/test folds. Forces model to generalise across physical samples, "
-        "not memorise measurement noise.",
-        "<b>Balanced class weights:</b> Plasma OFF samples are only 12.1% of "
-        "data. Class-weighted loss prevents majority-class bias in all classifiers.",
-        "<b>NMF over PCA:</b> Non-negative components are physically interpretable "
-        "as pure-species emission spectra. PCA components can be negative, "
-        "violating emission physics.",
-    ]
-    for d in decisions:
-        dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 17, C_TEXT, leading=18))
-        y -= dy + 2 * mm
+    dy = _draw_simple_table(c, x, y, w,
+                            headers=["Decision", "Rationale"],
+                            col_fracs=[0.35, 0.65],
+                            rows=[
+                                ["Per-element routing", "Cr: Ridge+PCA; others: ANN+NIST"],
+                                ["GroupKFold CV", "Prevents same-target leakage"],
+                                ["Balanced weights", "OFF=12.1%, weighted CE loss"],
+                                ["NMF over PCA", "Non-negative = physical spectra"],
+                            ])
+    y -= dy + 2 * mm
 
     y -= 3 * mm
     # Preprocessing details
