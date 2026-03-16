@@ -213,6 +213,61 @@ def make_shap_chart():
     return fig_to_image(fig)
 
 
+def make_kdd_chart():
+    """Key Design Decisions as a visual comparison table/chart."""
+    _chart_style()
+    decisions = ['Per-element\nRouting', 'GroupKFold\nCV', 'Balanced\nWeights', 'NMF over\nPCA']
+    impacts = ['Cr: Ridge+PCA\nOthers: ANN+NIST', 'Prevents\nsample leakage', 'Fixes 12.1%\nOFF imbalance', 'Non-negative\n= physical']
+    colors = [H_NAV, '#2471a3', '#8e44ad', '#27ae60']
+
+    fig, ax = plt.subplots(figsize=(7, 3.5))
+    y_pos = np.arange(len(decisions))
+    bars = ax.barh(y_pos, [85, 75, 70, 80], color=colors, height=0.6, alpha=0.85)
+
+    for i, (dec, imp) in enumerate(zip(decisions, impacts)):
+        ax.text(3, i, dec, va='center', fontsize=13, fontweight='bold', color='white')
+        ax.text(88, i, imp, va='center', fontsize=11, color=colors[i], fontweight='bold')
+
+    ax.set_xlim(0, 160)
+    ax.set_yticks([])
+    ax.set_xticks([])
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.set_title('Key Design Decisions', fontsize=14, fontweight='bold')
+    fig.tight_layout()
+    return fig_to_image(fig)
+
+
+def make_conclusions_chart():
+    """Summary infographic for conclusions panel."""
+    _chart_style()
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.axis('off')
+
+    # 4 achievement boxes
+    items = [
+        (50, 85, '13 Species Detected', '39 NIST lines, NMF validated', H_NAV),
+        (50, 65, '94.2% Accuracy | F1=0.843', '6 models compared (SVM best)', '#c8102e'),
+        (50, 45, 'Label Correction: 74% -> 94%', 'Data quality > model complexity', '#27ae60'),
+        (50, 25, 'SHAP Validates Physics', 'F I = primary SF6 etchant', '#8e44ad'),
+    ]
+
+    for cx, cy, title, subtitle, color in items:
+        ax.add_patch(plt.Rectangle((5, cy-8), 90, 16, facecolor=color, alpha=0.12,
+                                    edgecolor=color, linewidth=2, zorder=1))
+        ax.text(10, cy+2, title, fontsize=14, fontweight='bold', color=color, va='center')
+        ax.text(10, cy-4, subtitle, fontsize=11, color='#555555', va='center')
+
+    # Future work at bottom
+    ax.text(50, 6, 'Future: Multi-class tracking | Real-time streaming | Transfer learning',
+            fontsize=10, ha='center', color='#888888', style='italic')
+
+    fig.tight_layout()
+    return fig_to_image(fig)
+
+
 def make_spectrum_plot():
     """Generate an annotated sample OES spectrum showing key emission lines."""
     _chart_style()
@@ -380,14 +435,7 @@ def panel_intro(c, spectrum_img):
         dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_SMALL)
         y -= dy + 2 * mm
 
-    y -= 2 * mm
-    dy = draw_para(c,
-        "<b>Industrial relevance:</b> Enables real-time closed-loop control of "
-        "plasma processes in semiconductor fabrication, reducing defect rates "
-        "and improving yield.",
-        x, y, w, S_SMALL)
-    y -= dy + 3 * mm
-
+    y -= 3 * mm
     dy = draw_para(c, "<b>Three public datasets:</b>",
                    x, y, w, S_BODY)
     y -= dy + 2 * mm
@@ -479,41 +527,13 @@ def panel_method(c):
               x, y, w, note_style)
     y -= 16 * mm
 
-    # Key Design Decisions callout box
-    kdd_title = "<b>Key Design Decisions</b>"
-    dy = draw_para(c, kdd_title, x, y, w,
-                   _sty("kdd_t", 18, C_NAV, bold=True, leading=19))
-    y -= dy + 2 * mm
-
-    decisions = [
-        "<b>Per-element model routing:</b> Different plasma species require "
-        "different model architectures. Cr uses Ridge+PCA (avoids overfitting "
-        "on 976 NIST lines); other elements use ANN+NIST windows.",
-        "<b>GroupKFold CV:</b> Prevents same-target spectra leaking between "
-        "train/test folds. Forces model to generalise across physical samples, "
-        "not memorise measurement noise.",
-        "<b>Balanced class weights:</b> Plasma OFF samples are only 12.1% of "
-        "data. Class-weighted loss prevents majority-class bias in all classifiers.",
-        "<b>NMF over PCA:</b> Non-negative components are physically interpretable "
-        "as pure-species emission spectra. PCA components can be negative, "
-        "violating emission physics.",
-    ]
-    for d in decisions:
-        dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 17, C_TEXT, leading=18))
-        y -= dy + 2 * mm
-
-    y -= 3 * mm
-    # Preprocessing details
-    prep_detail = (
-        "<b>Preprocessing rationale:</b> ALS baseline (\u03bb=10<super>5</super>) "
-        "removes fluorescence continuum. Savitzky-Golay (window=11, order=3) "
-        "preserves peak shapes while reducing shot noise. SNV normalisation "
-        "corrects for optical path length variation between measurements. "
-        "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
-        "11-channel local window)."
-    )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 17, C_TEXT, leading=18))
+    # Key Design Decisions — as chart
+    if hasattr(panel_method, '_kdd_img') and panel_method._kdd_img:
+        img_w = w + 4 * mm
+        img_h = img_w * 0.55
+        c.drawImage(panel_method._kdd_img, x - 2 * mm, y - img_h,
+                    width=img_w, height=img_h,
+                    preserveAspectRatio=True, mask="auto")
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -785,90 +805,47 @@ def panel_interpretability(c, shap_img):
 #  PANEL 6: Conclusions & Further Work
 # ══════════════════════════════════════════════════════════════════
 
-def panel_conclusions(c):
+def panel_conclusions(c, conclusions_img):
     x, y, w = _panel_chrome(c, 2, 1, "6. Conclusions & Further Work")
 
-    dy = draw_para(c, "<b>Key Achievements:</b>", x, y, w,
-                   _sty("ka", 18, C_NAV, bold=True))
-    y -= dy + 2 * mm
+    # Conclusions infographic chart
+    if conclusions_img:
+        img_w = w + 4 * mm
+        img_h = img_w * 0.64
+        c.drawImage(conclusions_img, x - 2 * mm, y - img_h,
+                    width=img_w, height=img_h,
+                    preserveAspectRatio=True, mask="auto")
+        y -= img_h + 4 * mm
 
-    achievements = [
-        "Automated species detection: 13 plasma species, 39 NIST emission lines, "
-        "NMF decomposition validates against database",
-        "94.2% plasma state classification (SVM/RF best; CNN 93.2%, "
-        "Transformer 92.5% \u2014 6 models compared)",
-        "SHAP interpretability: F I importance = 0.131 (3x next species), "
-        "physically validated as primary SF6 etchant radical",
-        "Data-driven label correction: gas-flow labels (74%) \u2192 RF-power "
-        "labels (94%) via root-cause spectral analysis",
-        "Temperature regression: T_rot RMSE = 20.0 K, "
-        "T_vib = 102.0 K (Mesbah CAP dataset)",
-        "78 automated tests, 6 CLI task modes, fully reproducible pipeline",
-    ]
-    for a in achievements:
-        dy = draw_para(c, f"&#10003;&nbsp; {a}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
-        y -= dy + 1.5 * mm
-
-    y -= 3 * mm
+    # Limitations (brief)
     dy = draw_para(c, "<b>Limitations:</b>", x, y, w,
                    _sty("lim", 18, C_NAV, bold=True))
     y -= dy + 2 * mm
-
-    limitations = [
-        "OES&rarr;process parameter regression failed (R2 &lt; 0, causal irreversibility)",
-        "Boltzmann Te limited by narrow Ar I energy spread (0.33 eV)",
-        "Spatial etch prediction lacks wafer ID alignment",
+    lims = [
+        "OES&rarr;process regression R2 &lt; 0 (causal irreversibility)",
+        "Boltzmann Te: narrow Ar I energy spread (0.33 eV)",
     ]
-    for lim in limitations:
-        dy = draw_para(c, f"&#8226;&nbsp; {lim}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
+    for lim in lims:
+        dy = draw_para(c, f"&#8226; {lim}", x + 2 * mm, y, w - 4 * mm, S_REF)
         y -= dy + 1.5 * mm
 
+    # References
     y -= 3 * mm
-    dy = draw_para(c, "<b>Further Work:</b>", x, y, w,
-                   _sty("fw", 18, C_NAV, bold=True))
-    y -= dy + 2 * mm
-
-    further = [
-        "Extend to multi-class species classification (beyond binary ON/OFF)",
-        "Implement real-time OES monitoring with streaming inference",
-        "Apply transfer learning across different plasma reactors",
-    ]
-    for fw in further:
-        dy = draw_para(c, f"&#8226;&nbsp; {fw}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
-        y -= dy + 1.5 * mm
-
-    # Project metrics summary box
-    y -= 2 * mm
-    metrics_box = (
-        "<b>Project Metrics:</b> 15,000 spectra analysed | 3,648 spectral channels | "
-        "13 species identified | 39 NIST emission lines | 6 ML models compared | "
-        "78 automated tests | 32 development stories | 23 literature references | "
-        "6 CLI task modes | 3 public datasets"
-    )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 17, C_TEXT, leading=18))
-    _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
-    box_h = mh + 4 * mm
-    rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
-          r=2 * mm, fill=HexColor("#e8f4fd"))
-    draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 17, C_TEXT, leading=18))
-    y -= box_h + 3 * mm
-
-    y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
                    _sty("refs_hdr", 18, C_NAV, bold=True))
     y -= dy + 1 * mm
-
     refs = [
         "[1] Gidon <i>et al.</i> (2019) IEEE Trans. Radiat. Plasma Med. Sci.",
-        "[2] Coburn &amp; Chen (1980) J. Appl. Phys. \u2014 Actinometry",
-        "[3] Vaswani <i>et al.</i> (2017) NeurIPS \u2014 Transformer",
-        "[4] Contreras <i>et al.</i> (2024) Anal. Chem. \u2014 Spectral-zone SHAP",
-        "[5] BOSCH dataset: Zenodo #17122442",
+        "[2] Coburn &amp; Chen (1980) J. Appl. Phys.",
+        "[3] Lee &amp; Seung (1999) Nature \u2014 NMF",
+        "[4] Lundberg &amp; Lee (2017) NeurIPS \u2014 SHAP",
+        "[5] Vaswani <i>et al.</i> (2017) NeurIPS \u2014 Transformer",
+        "[6] Contreras <i>et al.</i> (2024) Anal. Chem.",
+        "[7] BOSCH dataset: Zenodo #17122442",
     ]
     for ref in refs:
-        dy = draw_para(c, ref, x + 1 * mm, y, w - 2 * mm, S_REF)
-        y -= dy + 1 * mm
+        dy = draw_para(c, ref, x + 1 * mm, y, w - 2 * mm, _sty("r", 14, C_SUB, leading=17))
+        y -= dy + 0.5 * mm
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -945,6 +922,23 @@ def main():
         print(f"  [SKIP] Spectrum plot: {e}")
         spectrum_img = None
 
+    try:
+        kdd_img = make_kdd_chart()
+        print("  [OK] KDD chart")
+    except Exception as e:
+        print(f"  [SKIP] KDD chart: {e}")
+        kdd_img = None
+
+    try:
+        conclusions_img = make_conclusions_chart()
+        print("  [OK] Conclusions chart")
+    except Exception as e:
+        print(f"  [SKIP] Conclusions chart: {e}")
+        conclusions_img = None
+
+    # Store KDD image for panel_method to access
+    panel_method._kdd_img = kdd_img
+
     # Build poster PDF
     print("Building poster...")
     pdf = canvas.Canvas(str(out), pagesize=(PAGE_W, PAGE_H))
@@ -961,7 +955,7 @@ def main():
     panel_species(pdf, species_img)
     panel_classification(pdf)
     panel_interpretability(pdf, shap_img)
-    panel_conclusions(pdf)
+    panel_conclusions(pdf, conclusions_img)
 
     pdf.save()
     print(f"Poster saved: {out}  ({out.stat().st_size / 1024:.0f} KB)")
