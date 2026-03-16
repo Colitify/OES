@@ -510,7 +510,7 @@ def panel_intro(c, spectrum_img):
 
     # Sample spectrum plot
     if spectrum_img:
-        dy = draw_captioned_image(c, spectrum_img, x, y, w, 0.38,
+        dy = draw_captioned_image(c, spectrum_img, x, y, w, 0.44,
                                   "Fig. 1: Simulated BOSCH RIE plasma OES spectrum with annotated species")
 
 
@@ -539,7 +539,7 @@ def panel_method(c):
 
     box_w = w - 4 * mm
     box_h = 16 * mm
-    sub_h = 14 * mm
+    sub_h = 16 * mm
     arrow_gap = 4 * mm
     box_x = x + (w - box_w) / 2
 
@@ -653,7 +653,7 @@ def panel_species(c, species_img):
 
     # Species detection chart FIRST (before table)
     if species_img:
-        dy = draw_captioned_image(c, species_img, x, y, w, 0.50,
+        dy = draw_captioned_image(c, species_img, x, y, w, 0.58,
                                   "Fig. 2: Automated species detection rates across 15,000 OES spectra")
         y -= dy
 
@@ -700,13 +700,13 @@ def panel_classification(c, model_img, perclass_img):
 
     # Model comparison CHART
     if model_img:
-        dy = draw_captioned_image(c, model_img, x, y, w, 0.54,
+        dy = draw_captioned_image(c, model_img, x, y, w, 0.60,
                                   "Fig. 3: 5-model accuracy and F1 comparison (5-fold CV)")
         y -= dy
 
     # Per-class CHART
     if perclass_img:
-        dy = draw_captioned_image(c, perclass_img, x + w * 0.04, y, w * 0.92, 0.60,
+        dy = draw_captioned_image(c, perclass_img, x + w * 0.04, y, w * 0.92, 0.68,
                                   "Fig. 4: Per-class precision, recall, and F1 score")
         y -= dy
 
@@ -733,7 +733,7 @@ def panel_interpretability(c, shap_img, actin_img):
 
     # SHAP chart (enlarged)
     if shap_img:
-        dy = draw_captioned_image(c, shap_img, x, y, w, 0.56,
+        dy = draw_captioned_image(c, shap_img, x, y, w, 0.64,
                                   "Fig. 5: SHAP feature importance — F I dominates (0.131)")
         y -= dy
 
@@ -753,7 +753,7 @@ def panel_interpretability(c, shap_img, actin_img):
 
     # Actinometry CHART (enlarged)
     if actin_img:
-        dy = draw_captioned_image(c, actin_img, x, y, w, 0.50,
+        dy = draw_captioned_image(c, actin_img, x, y, w, 0.58,
                                   "Fig. 6: Actinometry ratios (I_species / I_Ar, Coburn &amp; Chen 1980)")
         y -= dy
 
@@ -862,8 +862,8 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     Returns total height consumed.
     """
     cw = [w * f for f in col_fracs]
-    hdr_h = 8 * mm
-    row_h = 7 * mm
+    hdr_h = 10 * mm
+    row_h = 9 * mm
 
     # Header row
     c.setFillColor(C_NAV)
