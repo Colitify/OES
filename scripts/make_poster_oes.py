@@ -1,0 +1,701 @@
+#!/usr/bin/env python3
+"""Generate A1 academic poster for OES project.
+
+Usage:
+    python scripts/make_poster_oes.py
+Output:
+    poster_oes.pdf  (A1 portrait, 594 x 841 mm)
+"""
+
+import io
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+from reportlab.lib.units import mm
+from reportlab.lib.colors import HexColor, white, black
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.platypus import Paragraph
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# ── Page setup (A1 portrait) ────────────────────────────────────────
+PAGE_W = 594 * mm
+PAGE_H = 841 * mm
+
+# ── Colours ─────────────────────────────────────────────────────────
+C_NAV = HexColor("#1a3c5e")
+C_UOL_RED = HexColor("#c8102e")
+C_PANEL = HexColor("#ffffff")
+C_TEXT = HexColor("#2c3e50")
+C_SUB = HexColor("#555555")
+C_LIGHT_GREY = HexColor("#f5f5f5")
+C_BORDER = HexColor("#1a3c5e")  # Navy border for panels
+C_HIGH_BG = HexColor("#fef3f3")  # Light background for highlight boxes
+
+# Hex strings for matplotlib
+H_NAV = "#1a3c5e"
+H_BLUE = "#2980b9"
+H_RED = "#c8102e"
+
+# ── Layout constants ────────────────────────────────────────────────
+MARGIN = 14 * mm
+COL_GAP = 6 * mm
+ROW_GAP = 6 * mm
+BANNER_H = 60 * mm
+PAD = 8 * mm
+RAD = 3.5 * mm
+BORDER_W = 1.5  # pt for panel borders
+
+CONTENT_TOP = PAGE_H - MARGIN - BANNER_H
+CONTENT_BOT = MARGIN
+CONTENT_W = PAGE_W - 2 * MARGIN
+CONTENT_H = CONTENT_TOP - CONTENT_BOT
+
+COL_W = (CONTENT_W - 2 * COL_GAP) / 3
+ROW_H = (CONTENT_H - ROW_GAP) / 2
+
+
+# ── Helpers ─────────────────────────────────────────────────────────
+def col_x(i):
+    return MARGIN + i * (COL_W + COL_GAP)
+
+
+def row_y(j):
+    """Return bottom-y of row j (0=top row, 1=bottom row)."""
+    if j == 0:
+        return CONTENT_TOP - ROW_H
+    return CONTENT_BOT
+
+
+def rrect(c, x, y, w, h, r=RAD, fill=None, stroke=None, stroke_width=None):
+    c.saveState()
+    if fill:
+        c.setFillColor(fill)
+    if stroke:
+        c.setStrokeColor(stroke)
+        c.setLineWidth(stroke_width or BORDER_W)
+    p = c.beginPath()
+    p.roundRect(x, y, w, h, r)
+    p.close()
+    c.drawPath(p, fill=1 if fill else 0, stroke=1 if stroke else 0)
+    c.restoreState()
+
+
+def _sty(name, sz, color=C_TEXT, bold=False, align=TA_LEFT, leading=None):
+    return ParagraphStyle(
+        name, fontName="Helvetica-Bold" if bold else "Helvetica",
+        fontSize=sz, textColor=color, alignment=align,
+        leading=leading or sz * 1.35,
+    )
+
+
+S_BODY = _sty("body", 11, leading=15)
+S_SMALL = _sty("small", 10, leading=14)
+S_TABLE = _sty("table", 10, leading=13)
+S_REF = _sty("ref", 9, leading=12)
+S_CAP = _sty("cap", 9, C_SUB, align=TA_CENTER)
+
+
+def draw_para(c, text, x, y, w, style):
+    p = Paragraph(text, style)
+    _, h = p.wrap(w, 2000 * mm)
+    p.drawOn(c, x, y - h)
+    return h
+
+
+def fig_to_image(fig):
+    """Convert matplotlib figure to reportlab ImageReader."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight",
+                facecolor="white", edgecolor="none")
+    plt.close(fig)
+    buf.seek(0)
+    return ImageReader(buf)
+
+
+def load_uol_logo():
+    """Load University of Liverpool logo, convert opaque pixels to white."""
+    logo_path = Path(__file__).resolve().parent / "uol_logo_full.png"
+    if logo_path.exists():
+        from PIL import Image
+        img = Image.open(logo_path).convert("RGBA")
+        data = np.array(img)
+        opaque = data[:, :, 3] > 30
+        data[opaque, 0] = 255
+        data[opaque, 1] = 255
+        data[opaque, 2] = 255
+        img_out = Image.fromarray(data)
+        buf = io.BytesIO()
+        img_out.save(buf, format="PNG")
+        buf.seek(0)
+        return ImageReader(buf)
+    return None
+
+
+def _chart_style():
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
+        "font.size": 10,
+        "axes.titlesize": 11,
+        "axes.titleweight": "bold",
+        "axes.labelsize": 10,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+        "figure.facecolor": "white",
+    })
+
+
+# ══════════════════════════════════════════════════════════════════
+#  MATPLOTLIB CHART GENERATORS
+# ══════════════════════════════════════════════════════════════════
+
+def make_species_chart():
+    """Horizontal bar chart of species detection rates."""
+    _chart_style()
+    species = ["N2 2nd pos", "CO", "C2 Swan", "F I", "Ar I"]
+    rates = [0.7, 20.8, 23.8, 68.4, 69.8]
+    colors = [H_NAV, H_NAV, H_NAV, H_BLUE, H_BLUE]
+
+    fig, ax = plt.subplots(figsize=(4.5, 2.2))
+    bars = ax.barh(species, rates, color=colors, height=0.6, edgecolor="white")
+    for bar, val in zip(bars, rates):
+        ax.text(bar.get_width() + 1.0, bar.get_y() + bar.get_height() / 2,
+                f"{val}%", va="center", fontsize=9, fontweight="bold",
+                color=H_NAV)
+    ax.set_xlim(0, 85)
+    ax.set_xlabel("Detection Rate (%)", fontsize=10)
+    ax.set_title("Species Detection Rate (15,000 spectra)", fontsize=11)
+    ax.tick_params(labelsize=9)
+    fig.tight_layout()
+    return fig_to_image(fig)
+
+
+def make_shap_chart():
+    """Horizontal bar chart of SHAP feature importance."""
+    _chart_style()
+    features = ["CO", "H_beta", "O I", "C2 Swan", "F I"]
+    values = [0.033, 0.040, 0.041, 0.046, 0.131]
+    colors = [H_NAV] * 5
+
+    fig, ax = plt.subplots(figsize=(4.5, 2.2))
+    bars = ax.barh(features, values, color=colors, height=0.6, edgecolor="white")
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_width() + 0.002, bar.get_y() + bar.get_height() / 2,
+                f"{val:.3f}", va="center", fontsize=9, fontweight="bold",
+                color=H_NAV)
+    ax.set_xlim(0, 0.17)
+    ax.set_xlabel("Mean |SHAP value|", fontsize=10)
+    ax.set_title("SHAP Feature Importance (RF)", fontsize=11)
+    ax.tick_params(labelsize=9)
+    fig.tight_layout()
+    return fig_to_image(fig)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  BANNER
+# ══════════════════════════════════════════════════════════════════
+
+def draw_banner(c, logo_img):
+    bx, by = MARGIN, PAGE_H - MARGIN - BANNER_H
+    bw = PAGE_W - 2 * MARGIN
+
+    # Navy background
+    rrect(c, bx, by, bw, BANNER_H, r=4 * mm, fill=C_NAV)
+
+    # Logo on left
+    if logo_img:
+        logo_h = BANNER_H - 16 * mm
+        logo_w = logo_h * (1024 / 261)  # original aspect ratio
+        logo_x = bx + 6 * mm
+        logo_y = by + (BANNER_H - logo_h) / 2 + 2 * mm
+        c.drawImage(logo_img, logo_x, logo_y, width=logo_w, height=logo_h,
+                    preserveAspectRatio=True, mask="auto")
+        title_x = logo_x + logo_w + 6 * mm
+    else:
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(bx + 10 * mm, by + BANNER_H / 2, "University of Liverpool")
+        title_x = bx + 80 * mm
+
+    title_w = bx + bw - title_x - 5 * mm
+
+    # Title
+    sty_t = _sty("banner_title", 28, white, bold=True, align=TA_CENTER, leading=34)
+    draw_para(c,
+              "Machine Learning for Optical Emission Spectroscopy<br/>"
+              "in Plasma Diagnostics",
+              title_x, by + BANNER_H - 5 * mm, title_w, sty_t)
+
+    # Authors
+    sty_a = _sty("banner_authors", 13, HexColor("#d4e6f1"), align=TA_CENTER, leading=16)
+    draw_para(c,
+              "Liangqing Luo &nbsp;|&nbsp; Supervisor: Dr Xin Tu &nbsp;|&nbsp; "
+              "Assessor: Dr Xue Yong",
+              title_x, by + 16 * mm, title_w, sty_a)
+
+    # Department
+    sty_d = _sty("banner_dept", 11, HexColor("#a9cce3"), align=TA_CENTER, leading=14)
+    draw_para(c,
+              "Department of Electrical Engineering and Electronics, "
+              "University of Liverpool",
+              title_x, by + 8 * mm, title_w, sty_d)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL CHROME
+# ══════════════════════════════════════════════════════════════════
+
+HEADER_H = 12 * mm
+
+
+def _panel_chrome(c, col, row, title):
+    """Draw white panel with navy border and header. Returns (x, y_cursor, w)."""
+    x = col_x(col)
+    y = row_y(row)
+    w = COL_W
+    h = ROW_H
+
+    # White panel with navy border, rounded corners
+    rrect(c, x, y, w, h, r=RAD, fill=C_PANEL, stroke=C_BORDER,
+          stroke_width=BORDER_W)
+
+    # Header text
+    c.setFillColor(C_NAV)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(x + PAD, y + h - HEADER_H + 2 * mm, title)
+
+    # Thin navy line under header
+    c.setStrokeColor(C_NAV)
+    c.setLineWidth(1.0)
+    c.line(x + PAD, y + h - HEADER_H, x + w - PAD, y + h - HEADER_H)
+
+    return x + PAD, y + h - HEADER_H - 5 * mm, w - 2 * PAD
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL 1: Introduction
+# ══════════════════════════════════════════════════════════════════
+
+def panel_intro(c):
+    x, y, w = _panel_chrome(c, 0, 0, "1. Introduction")
+
+    intro_text = (
+        "Optical Emission Spectroscopy (OES) provides non-invasive, real-time "
+        "diagnostics of plasma processes by analysing emission spectra from "
+        "excited species. This project develops an automated ML pipeline for "
+        "plasma OES analysis targeting four objectives:"
+    )
+    dy = draw_para(c, intro_text, x, y, w, S_BODY)
+    y -= dy + 4 * mm
+
+    # 4 numbered aims
+    aims = [
+        "Spectral feature identification (automated peak detection + NMF decomposition)",
+        "Plasma species classification (SVM, RF, CNN, Transformer comparison)",
+        "Spatiotemporal evolution analysis (Attention-LSTM phase prediction)",
+        "Semi-quantitative intensity analysis (actinometry, Boltzmann T<sub>e</sub>)",
+    ]
+    for i, aim in enumerate(aims):
+        bullet = f"<b>{i+1}.</b>&nbsp; {aim}"
+        dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_BODY)
+        y -= dy + 2 * mm
+
+    y -= 3 * mm
+    dy = draw_para(c, "Three public datasets spanning different plasma configurations:",
+                   x, y, w, S_BODY)
+    y -= dy + 3 * mm
+
+    # Dataset table
+    _draw_simple_table(c, x, y, w,
+                       headers=["Dataset", "Channels", "Notes"],
+                       col_fracs=[0.35, 0.22, 0.43],
+                       rows=[
+                           ["LIBS Benchmark", "40,002 ch", "Steel composition"],
+                           ["Mesbah CAP", "51 ch", "N2 plasma T_rot/T_vib"],
+                           ["BOSCH RIE", "3,648 ch", "25 Hz etch monitoring"],
+                       ])
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL 2: Methodology (pipeline flowchart)
+# ══════════════════════════════════════════════════════════════════
+
+def panel_method(c):
+    x, y, w = _panel_chrome(c, 1, 0, "2. Methodology")
+
+    # Pipeline stages for vertical flowchart
+    stages = [
+        ("Raw OES Spectra (3,648 channels)", HexColor("#2980b9")),
+        ("Preprocessing", HexColor("#2471a3")),
+        ("Feature Extraction", HexColor("#8e44ad")),
+        ("Model Training (6 architectures)", HexColor("#27ae60")),
+        ("Evaluation & Interpretability", HexColor("#e67e22")),
+    ]
+    sub_labels = [
+        None,
+        "Cosmic Ray \u2192 ALS Baseline \u2192 SavGol Smooth \u2192 SNV Normalise",
+        "PCA | NIST Line Selection | NMF Decomposition | PlasmaDescriptor",
+        "PLS | Ridge/SVM/RF | CNN | LSTM | Attention-LSTM | Transformer",
+        "5-fold CV | SHAP | Boltzmann Plot | Actinometry",
+    ]
+
+    box_w = w - 4 * mm
+    box_h = 16 * mm
+    sub_h = 10 * mm
+    arrow_gap = 5 * mm
+    box_x = x + (w - box_w) / 2
+
+    for i, (label, color) in enumerate(stages):
+        # Main box
+        box_y = y - box_h
+        rrect(c, box_x, box_y, box_w, box_h, r=3 * mm, fill=color)
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(box_x + box_w / 2, box_y + box_h / 2 - 2, label)
+        y -= box_h
+
+        # Sub-label box (lighter)
+        if sub_labels[i]:
+            sub_y = y - sub_h
+            lighter = HexColor("#ecf0f1")
+            rrect(c, box_x + 4 * mm, sub_y, box_w - 8 * mm, sub_h,
+                  r=2 * mm, fill=lighter, stroke=color, stroke_width=0.8)
+            # Wrap sub-label text
+            sub_style = _sty(f"sub_{i}", 8.5, C_TEXT, align=TA_CENTER, leading=11)
+            draw_para(c, sub_labels[i],
+                      box_x + 6 * mm, sub_y + sub_h - 2 * mm,
+                      box_w - 12 * mm, sub_style)
+            y -= sub_h
+
+        # Arrow between stages
+        if i < len(stages) - 1:
+            cx = box_x + box_w / 2
+            arrow_top = y
+            arrow_bot = y - arrow_gap
+            _draw_arrow_down(c, cx, arrow_top, arrow_bot)
+            y -= arrow_gap
+
+    y -= 5 * mm
+    note_style = _sty("optuna_note", 9, C_SUB, leading=12)
+    draw_para(c,
+              "<i>Hyperparameter optimisation: Optuna two-stage search "
+              "(20 trials per target)</i>",
+              x, y, w, note_style)
+
+
+def _draw_arrow_down(c, cx, y_top, y_bot):
+    c.saveState()
+    c.setStrokeColor(C_TEXT)
+    c.setFillColor(C_TEXT)
+    c.setLineWidth(1.5)
+    c.line(cx, y_top, cx, y_bot + 2.5 * mm)
+    p = c.beginPath()
+    p.moveTo(cx, y_bot)
+    p.lineTo(cx - 2 * mm, y_bot + 3.5 * mm)
+    p.lineTo(cx + 2 * mm, y_bot + 3.5 * mm)
+    p.close()
+    c.drawPath(p, fill=1, stroke=0)
+    c.restoreState()
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL 3: Species Identification
+# ══════════════════════════════════════════════════════════════════
+
+def panel_species(c, species_img):
+    x, y, w = _panel_chrome(c, 2, 0, "3. Species Identification")
+
+    intro = (
+        "NMF decomposes mixed spectra into pure-species spectral components. "
+        "Detected peaks are matched to NIST Atomic Spectra Database."
+    )
+    dy = draw_para(c, intro, x, y, w, S_BODY)
+    y -= dy + 4 * mm
+
+    # Species detection chart
+    if species_img:
+        img_w = w
+        img_h = img_w * 0.49
+        c.drawImage(species_img, x, y - img_h,
+                    width=img_w, height=img_h,
+                    preserveAspectRatio=True, mask="auto")
+        y -= img_h + 4 * mm
+
+    # Key emission lines table
+    y -= 2 * mm
+    _draw_simple_table(c, x, y, w,
+                       headers=["Species", "Lines (nm)", "Origin"],
+                       col_fracs=[0.22, 0.38, 0.40],
+                       rows=[
+                           ["F I", "685.6, 703.7", "SF6 etchant"],
+                           ["Ar I", "750.4, 763.5", "Carrier gas"],
+                           ["C2 Swan", "516.5, 563.6", "C4F8 product"],
+                       ])
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL 4: Classification Results
+# ══════════════════════════════════════════════════════════════════
+
+def panel_classification(c):
+    x, y, w = _panel_chrome(c, 0, 1, "4. Classification Results")
+
+    # Highlight box with UoL red border
+    highlight_h = 14 * mm
+    rrect(c, x - 2 * mm, y - highlight_h, w + 4 * mm, highlight_h,
+          r=3 * mm, fill=C_HIGH_BG, stroke=C_UOL_RED, stroke_width=2.0)
+    sty_hl = _sty("highlight", 14, C_UOL_RED, bold=True, align=TA_CENTER,
+                   leading=18)
+    draw_para(c, "94.2% Accuracy (SVM/RF, 5-fold CV)",
+              x, y - 3 * mm, w, sty_hl)
+    y -= highlight_h + 4 * mm
+
+    # Model comparison table
+    dy = _draw_simple_table(c, x, y, w,
+                            headers=["Model", "Accuracy", "F1 macro"],
+                            col_fracs=[0.46, 0.27, 0.27],
+                            rows=[
+                                ["SVM (RBF)", "94.2%", "0.843"],
+                                ["Random Forest", "94.2%", "0.843"],
+                                ["CNN (1D-Conv)", "93.2%", "0.822"],
+                                ["Transformer", "92.5%", "0.802"],
+                                ["Attention-LSTM", "74.4%", "\u2014"],
+                            ])
+    y -= dy + 4 * mm
+
+    # Per-class table
+    dy = _draw_simple_table(c, x, y, w,
+                            headers=["Class", "Precision", "Recall", "F1"],
+                            col_fracs=[0.34, 0.22, 0.22, 0.22],
+                            rows=[
+                                ["Plasma OFF", "0.87", "0.61", "0.717"],
+                                ["Plasma ON", "0.95", "0.99", "0.968"],
+                            ])
+    y -= dy + 4 * mm
+
+    note = (
+        "<i>Labels derived from RF source power (plasma ON/OFF). "
+        "Traditional ML outperforms deep learning due to near-linear "
+        "decision boundary and limited training data (15,000 samples).</i>"
+    )
+    draw_para(c, note, x, y, w, S_SMALL)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL 5: Interpretability & Physics
+# ══════════════════════════════════════════════════════════════════
+
+def panel_interpretability(c, shap_img):
+    x, y, w = _panel_chrome(c, 1, 1, "5. Interpretability & Physics")
+
+    # SHAP chart
+    if shap_img:
+        img_w = w
+        img_h = img_w * 0.49
+        c.drawImage(shap_img, x, y - img_h,
+                    width=img_w, height=img_h,
+                    preserveAspectRatio=True, mask="auto")
+        y -= img_h + 4 * mm
+
+    text1 = (
+        "F I (fluorine radical) identified as the most discriminative "
+        "species \u2014 consistent with its role as the primary etchant "
+        "in SF<sub>6</sub> plasma."
+    )
+    dy = draw_para(c, text1, x, y, w, S_BODY)
+    y -= dy + 4 * mm
+
+    # Key finding box
+    finding = (
+        "<b>Root Cause Discovery:</b> Etch/passivation spectral difference "
+        "&lt; 0.35\u03c3 (indistinguishable). RF power ON/OFF provides "
+        "0.56\u03c3 separation. Classification improved 74% \u2192 94%."
+    )
+    p_tmp = Paragraph(finding, S_BODY)
+    _, fh = p_tmp.wrap(w - 6 * mm, 999 * mm)
+    box_h = fh + 6 * mm
+    rrect(c, x - 2 * mm, y - box_h, w + 4 * mm, box_h,
+          r=3 * mm, fill=HexColor("#e8f4fd"))
+    draw_para(c, finding, x + 1 * mm, y - 3 * mm, w - 4 * mm, S_BODY)
+    y -= box_h + 5 * mm
+
+    # Boltzmann result
+    boltz = (
+        "<b>Boltzmann result:</b> Excitation temperature "
+        "T<sub>exc</sub> = 13,334 K (Boltzmann plot, 6 Ar I lines)"
+    )
+    draw_para(c, boltz, x, y, w, S_BODY)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  PANEL 6: Conclusions & Further Work
+# ══════════════════════════════════════════════════════════════════
+
+def panel_conclusions(c):
+    x, y, w = _panel_chrome(c, 2, 1, "6. Conclusions & Further Work")
+
+    dy = draw_para(c, "<b>Key Achievements:</b>", x, y, w,
+                   _sty("ka", 11, C_NAV, bold=True))
+    y -= dy + 2 * mm
+
+    achievements = [
+        "Automated species detection pipeline identifying 13 plasma species from NIST database",
+        "94.2% plasma state classification with 6 ML models compared",
+        "SHAP confirms F I as primary discriminator (physically validated)",
+        "Data-driven label correction methodology (gas flow \u2192 RF power)",
+        "78 automated tests, fully reproducible CLI pipeline",
+    ]
+    for a in achievements:
+        dy = draw_para(c, f"&#10003;&nbsp; {a}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
+        y -= dy + 1.5 * mm
+
+    y -= 3 * mm
+    dy = draw_para(c, "<b>Limitations:</b>", x, y, w,
+                   _sty("lim", 11, C_NAV, bold=True))
+    y -= dy + 2 * mm
+
+    limitations = [
+        "OES\u2192process parameter regression failed (R\u00b2 &lt; 0, causal irreversibility)",
+        "Boltzmann T<sub>e</sub> limited by narrow Ar I energy spread (0.33 eV)",
+        "Spatial etch prediction lacks wafer ID alignment",
+    ]
+    for lim in limitations:
+        dy = draw_para(c, f"&#8226;&nbsp; {lim}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
+        y -= dy + 1.5 * mm
+
+    y -= 3 * mm
+    dy = draw_para(c, "<b>Further Work:</b>", x, y, w,
+                   _sty("fw", 11, C_NAV, bold=True))
+    y -= dy + 2 * mm
+
+    further = [
+        "Extend to multi-class species classification (beyond binary ON/OFF)",
+        "Implement real-time OES monitoring with streaming inference",
+        "Apply transfer learning across different plasma reactors",
+    ]
+    for fw in further:
+        dy = draw_para(c, f"&#8226;&nbsp; {fw}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
+        y -= dy + 1.5 * mm
+
+    y -= 4 * mm
+    dy = draw_para(c, "<b>References:</b>", x, y, w,
+                   _sty("refs_hdr", 10, C_NAV, bold=True))
+    y -= dy + 1 * mm
+
+    refs = [
+        "[1] Gidon <i>et al.</i> (2019) IEEE Trans. Radiat. Plasma Med. Sci.",
+        "[2] Coburn &amp; Chen (1980) J. Appl. Phys. \u2014 Actinometry",
+        "[3] Vaswani <i>et al.</i> (2017) NeurIPS \u2014 Transformer",
+        "[4] Contreras <i>et al.</i> (2024) Anal. Chem. \u2014 Spectral-zone SHAP",
+        "[5] BOSCH dataset: Zenodo #17122442",
+    ]
+    for ref in refs:
+        dy = draw_para(c, ref, x + 1 * mm, y, w - 2 * mm, S_REF)
+        y -= dy + 1 * mm
+
+
+# ══════════════════════════════════════════════════════════════════
+#  TABLE DRAWING HELPER
+# ══════════════════════════════════════════════════════════════════
+
+def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
+    """Draw a simple table with alternating row backgrounds.
+
+    Returns total height consumed.
+    """
+    cw = [w * f for f in col_fracs]
+    hdr_h = 8 * mm
+    row_h = 7 * mm
+
+    # Header row
+    c.setFillColor(C_NAV)
+    c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
+    c.setFillColor(white)
+    c.setFont("Helvetica-Bold", 10)
+    cx = x
+    for j, hdr in enumerate(headers):
+        c.drawCentredString(cx + cw[j] / 2, y - hdr_h + 2.5 * mm, hdr)
+        cx += cw[j]
+
+    # Data rows
+    for i, row in enumerate(rows):
+        ry = y - hdr_h - (i + 1) * row_h
+        bg = C_LIGHT_GREY if i % 2 == 0 else C_PANEL
+        c.setFillColor(bg)
+        c.rect(x, ry, w, row_h, fill=1, stroke=0)
+        cx = x
+        for j, cell in enumerate(row):
+            c.setFont("Helvetica", 10)
+            c.setFillColor(C_TEXT)
+            c.drawCentredString(cx + cw[j] / 2, ry + 2 * mm, cell)
+            cx += cw[j]
+
+    # Border around whole table
+    total_h = hdr_h + len(rows) * row_h
+    c.setStrokeColor(C_NAV)
+    c.setLineWidth(0.5)
+    c.rect(x, y - total_h, w, total_h, fill=0, stroke=1)
+
+    return total_h
+
+
+# ══════════════════════════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════════════════════════
+
+def main():
+    out = ROOT / "poster_oes.pdf"
+
+    print("Generating charts...")
+    try:
+        species_img = make_species_chart()
+        print("  [OK] Species detection chart")
+    except Exception as e:
+        print(f"  [SKIP] Species chart: {e}")
+        species_img = None
+
+    try:
+        shap_img = make_shap_chart()
+        print("  [OK] SHAP chart")
+    except Exception as e:
+        print(f"  [SKIP] SHAP chart: {e}")
+        shap_img = None
+
+    try:
+        logo_img = load_uol_logo()
+        print("  [OK] UoL logo")
+    except Exception as e:
+        print(f"  [SKIP] UoL logo: {e}")
+        logo_img = None
+
+    # Build poster PDF
+    print("Building poster...")
+    pdf = canvas.Canvas(str(out), pagesize=(PAGE_W, PAGE_H))
+    pdf.setTitle("ML for OES in Plasma Diagnostics - Academic Poster")
+    pdf.setAuthor("Liangqing Luo")
+
+    # Light grey background
+    pdf.setFillColor(HexColor("#f0f0f0"))
+    pdf.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
+
+    draw_banner(pdf, logo_img)
+    panel_intro(pdf)
+    panel_method(pdf)
+    panel_species(pdf, species_img)
+    panel_classification(pdf)
+    panel_interpretability(pdf, shap_img)
+    panel_conclusions(pdf)
+
+    pdf.save()
+    print(f"Poster saved: {out}  ({out.stat().st_size / 1024:.0f} KB)")
+
+
+if __name__ == "__main__":
+    main()
