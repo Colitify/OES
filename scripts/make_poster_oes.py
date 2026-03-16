@@ -266,49 +266,37 @@ def make_spectrum_plot():
 #  BANNER
 # ══════════════════════════════════════════════════════════════════
 
-def draw_banner(c, logo_img):
+def draw_banner(c, logo_img=None):
     bx, by = MARGIN, PAGE_H - MARGIN - BANNER_H
     bw = PAGE_W - 2 * MARGIN
 
     # Navy background
     rrect(c, bx, by, bw, BANNER_H, r=4 * mm, fill=C_NAV)
 
-    # Logo on left
-    if logo_img:
-        logo_h = BANNER_H - 16 * mm
-        logo_w = logo_h * (1024 / 261)  # original aspect ratio
-        logo_x = bx + 6 * mm
-        logo_y = by + (BANNER_H - logo_h) / 2 + 2 * mm
-        c.drawImage(logo_img, logo_x, logo_y, width=logo_w, height=logo_h)
-        title_x = logo_x + logo_w + 6 * mm
-    else:
-        c.setFillColor(white)
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(bx + 10 * mm, by + BANNER_H / 2, "University of Liverpool")
-        title_x = bx + 80 * mm
-
-    title_w = bx + bw - title_x - 5 * mm
+    # Full-width centred title (no logo)
+    title_x = bx + 5 * mm
+    title_w = bw - 10 * mm
 
     # Title
-    sty_t = _sty("banner_title", 28, white, bold=True, align=TA_CENTER, leading=34)
+    sty_t = _sty("banner_title", 30, white, bold=True, align=TA_CENTER, leading=36)
     draw_para(c,
               "Machine Learning for Optical Emission Spectroscopy<br/>"
               "in Plasma Diagnostics",
-              title_x, by + BANNER_H - 5 * mm, title_w, sty_t)
+              title_x, by + BANNER_H - 4 * mm, title_w, sty_t)
 
     # Authors
-    sty_a = _sty("banner_authors", 13, HexColor("#d4e6f1"), align=TA_CENTER, leading=16)
+    sty_a = _sty("banner_authors", 15, HexColor("#d4e6f1"), align=TA_CENTER, leading=18)
     draw_para(c,
               "Liangqing Luo &nbsp;|&nbsp; Supervisor: Dr Xin Tu &nbsp;|&nbsp; "
               "Assessor: Dr Xue Yong",
               title_x, by + 16 * mm, title_w, sty_a)
 
     # Department
-    sty_d = _sty("banner_dept", 11, HexColor("#a9cce3"), align=TA_CENTER, leading=14)
+    sty_d = _sty("banner_dept", 13, HexColor("#a9cce3"), align=TA_CENTER, leading=16)
     draw_para(c,
               "Department of Electrical Engineering and Electronics, "
               "University of Liverpool",
-              title_x, by + 8 * mm, title_w, sty_d)
+              title_x, by + 6 * mm, title_w, sty_d)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -317,16 +305,27 @@ def draw_banner(c, logo_img):
 
 HEADER_H = 12 * mm
 
+# Per-panel background tints (subtle, pastel)
+PANEL_BG = {
+    (0, 0): HexColor("#eef5fb"),  # 1. Introduction — light blue
+    (1, 0): HexColor("#ffffff"),  # 2. Methodology — white (flowchart has colours)
+    (2, 0): HexColor("#eafaf1"),  # 3. Species ID — light green
+    (0, 1): HexColor("#fef9e7"),  # 4. Classification — light yellow (highlight results)
+    (1, 1): HexColor("#f4ecf7"),  # 5. Interpretability — light purple
+    (2, 1): HexColor("#eef5fb"),  # 6. Conclusions — light blue
+}
+
 
 def _panel_chrome(c, col, row, title):
-    """Draw white panel with navy border and header. Returns (x, y_cursor, w)."""
+    """Draw panel with tinted background, navy border and header. Returns (x, y_cursor, w)."""
     x = col_x(col)
     y = row_y(row)
     w = COL_W
     h = row_h(row)
 
-    # White panel with navy border, rounded corners
-    rrect(c, x, y, w, h, r=RAD, fill=C_PANEL, stroke=C_BORDER,
+    # Tinted panel with navy border, rounded corners
+    bg = PANEL_BG.get((col, row), C_PANEL)
+    rrect(c, x, y, w, h, r=RAD, fill=bg, stroke=C_BORDER,
           stroke_width=BORDER_W)
 
     # Header text
@@ -947,13 +946,6 @@ def main():
         print(f"  [SKIP] Spectrum plot: {e}")
         spectrum_img = None
 
-    try:
-        logo_img = load_uol_logo()
-        print("  [OK] UoL logo")
-    except Exception as e:
-        print(f"  [SKIP] UoL logo: {e}")
-        logo_img = None
-
     # Build poster PDF
     print("Building poster...")
     pdf = canvas.Canvas(str(out), pagesize=(PAGE_W, PAGE_H))
@@ -964,7 +956,7 @@ def main():
     pdf.setFillColor(HexColor("#f0f0f0"))
     pdf.rect(0, 0, PAGE_W, PAGE_H, fill=1, stroke=0)
 
-    draw_banner(pdf, logo_img)
+    draw_banner(pdf)
     panel_intro(pdf, spectrum_img)
     panel_method(pdf)
     panel_species(pdf, species_img)
