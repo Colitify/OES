@@ -375,7 +375,7 @@ def panel_intro(c, spectrum_img):
         "<b>Spatiotemporal evolution</b> \u2014 Attention-LSTM phase prediction, "
         "species time-series extraction",
         "<b>Semi-quantitative intensity</b> \u2014 actinometry (Coburn &amp; Chen 1980), "
-        "Boltzmann T<sub>e</sub> estimation",
+        "Boltzmann Te estimation",
     ]
     for i, aim in enumerate(aims):
         bullet = f"<b>{i+1}.</b>&nbsp; {aim}"
@@ -586,7 +586,7 @@ def panel_species(c, species_img):
     nmf_note = (
         "<b>Validation:</b> NMF Component 0 peaks at 684.4 nm "
         "(\u2248 F I 685.6); Component 2 at 515.1 nm "
-        "(approx. C<sub>2</sub> Swan 516.5) &mdash; unsupervised decomposition "
+        "(approx. C2 Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
     draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 17, C_SUB, leading=18))
@@ -687,9 +687,9 @@ def panel_classification(c):
         "Direct spectral classification (SVM/RF on 3,648 channels) retains "
         "full wavelength information, explaining the 20% accuracy gap.",
         "<b>Species detection validates physics:</b> Ar I (69.8%) and F I "
-        "(68.4%) are dominant &mdash; consistent with SF<sub>6</sub>/Ar "
-        "process gas. C<sub>2</sub> Swan (23.8%) only appears during "
-        "C<sub>4</sub>F<sub>8</sub> passivation steps.",
+        "(68.4%) are dominant &mdash; consistent with SF6/Ar "
+        "process gas. C2 Swan (23.8%) only appears during "
+        "C4F8 passivation steps.",
     ]
     for a in analyses:
         dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
@@ -716,7 +716,7 @@ def panel_interpretability(c, shap_img):
     text1 = (
         "F I (fluorine radical) identified as the most discriminative "
         "species \u2014 consistent with its role as the primary etchant "
-        "in SF<sub>6</sub> plasma."
+        "in SF6 plasma."
     )
     dy = draw_para(c, text1, x, y, w, S_BODY)
     y -= dy + 4 * mm
@@ -737,21 +737,21 @@ def panel_interpretability(c, shap_img):
 
     # Boltzmann result
     boltz = (
-        "<b>Boltzmann T<sub>exc</sub>:</b> Excitation temperature "
+        "<b>Boltzmann T_exc:</b> Excitation temperature "
         "= <b>13,334 K</b> (Boltzmann plot, 6 Ar I lines, 696.5\u2013772.4 nm). "
-        "Estimated via linear regression of ln(I\u00b7\u03bb/gA) vs E<sub>upper</sub>."
+        "Estimated via linear regression of ln(I\u00b7\u03bb/gA) vs E_upper."
     )
     dy = draw_para(c, boltz, x, y, w, S_SMALL)
     y -= dy + 3 * mm
 
     # Physics of F_I dominance
     fi_physics = (
-        "<b>Why F I dominates:</b> In SF<sub>6</sub> plasma, electron-impact "
+        "<b>Why F I dominates:</b> In SF6 plasma, electron-impact "
         "dissociation produces F radicals "
-        "(SF<sub>6</sub> + e<super>-</super> &rarr; SF<sub>5</sub> + F + e<super>-</super>). "
-        "The F I 703.7 nm line (2p<super>4</super>3p &rarr; 2p<super>4</super>3s transition, "
+        "(SF6 + e- &rarr; SF5 + F + e-). "
+        "The F I 703.7 nm line (2p4 3p &rarr; 2p4 3s transition, "
         "upper state 14.5 eV) has high transition probability "
-        "(A = 6.4 &times; 10<super>7</super> s<super>-1</super>) "
+        "(A = 6.4 x 10^7 /s) "
         "and is well-separated from neighbouring lines. Its intensity directly tracks "
         "F radical density, making it the most sensitive probe of etch chemistry."
     )
@@ -761,10 +761,10 @@ def panel_interpretability(c, shap_img):
     # Actinometry explanation
     actin = (
         "<b>Actinometry:</b> Species concentration proportional to "
-        "I<sub>target</sub> / I<sub>Ar</sub> (Coburn &amp; Chen 1980). "
+        "I_target / I_Ar (Coburn &amp; Chen 1980). "
         "Ar carrier gas at known constant flow serves as reference. "
         "F/Ar ratio = 1.07 +/- 0.04; "
-        "C<sub>2</sub>/Ar ratio = 1.13 +/- 0.20 (largest variability "
+        "C2/Ar ratio = 1.13 +/- 0.20 (largest variability "
         "&mdash; reflects etch/passivation cycling)."
     )
     dy = draw_para(c, actin, x, y, w, S_SMALL)
@@ -800,11 +800,11 @@ def panel_conclusions(c):
         "94.2% plasma state classification (SVM/RF best; CNN 93.2%, "
         "Transformer 92.5% \u2014 6 models compared)",
         "SHAP interpretability: F I importance = 0.131 (3x next species), "
-        "physically validated as primary SF<sub>6</sub> etchant radical",
+        "physically validated as primary SF6 etchant radical",
         "Data-driven label correction: gas-flow labels (74%) \u2192 RF-power "
         "labels (94%) via root-cause spectral analysis",
-        "Temperature regression: T<sub>rot</sub> RMSE = 20.0 K, "
-        "T<sub>vib</sub> = 102.0 K (Mesbah CAP dataset)",
+        "Temperature regression: T_rot RMSE = 20.0 K, "
+        "T_vib = 102.0 K (Mesbah CAP dataset)",
         "78 automated tests, 6 CLI task modes, fully reproducible pipeline",
     ]
     for a in achievements:
@@ -817,8 +817,8 @@ def panel_conclusions(c):
     y -= dy + 2 * mm
 
     limitations = [
-        "OES&rarr;process parameter regression failed (R<super>2</super> &lt; 0, causal irreversibility)",
-        "Boltzmann T<sub>e</sub> limited by narrow Ar I energy spread (0.33 eV)",
+        "OES&rarr;process parameter regression failed (R2 &lt; 0, causal irreversibility)",
+        "Boltzmann Te limited by narrow Ar I energy spread (0.33 eV)",
         "Spatial etch prediction lacks wafer ID alignment",
     ]
     for lim in limitations:
