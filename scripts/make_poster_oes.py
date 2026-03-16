@@ -280,8 +280,7 @@ def draw_banner(c, logo_img=None):
     # Title
     sty_t = _sty("banner_title", 30, white, bold=True, align=TA_CENTER, leading=36)
     draw_para(c,
-              "Machine Learning for Optical Emission Spectroscopy<br/>"
-              "in Plasma Diagnostics",
+              "Machine Learning for Spectral Analysis",
               title_x, by + BANNER_H - 4 * mm, title_w, sty_t)
 
     # Authors
