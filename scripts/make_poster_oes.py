@@ -668,11 +668,33 @@ def panel_classification(c):
                        _sty("arch_item", 16, C_TEXT, leading=17))
         y -= dy + 1.5 * mm
 
-    note = (
-        "<i>Labels: RF source power (plasma ON/OFF). Traditional ML "
-        "outperforms DL due to near-linear boundary &amp; limited data.</i>"
-    )
-    draw_para(c, note, x, y, w, S_REF)
+    # Results analysis
+    dy = draw_para(c, "<b>Analysis:</b>", x, y, w,
+                   _sty("analysis_h", 18, C_NAV, bold=True))
+    y -= dy + 1.5 * mm
+
+    analyses = [
+        "<b>Traditional ML &gt; Deep Learning:</b> SVM/RF achieve 94.2% vs "
+        "CNN 93.2% and Transformer 92.5%. The plasma ON/OFF decision boundary "
+        "is near-linear in feature space, giving kernel methods the advantage. "
+        "Deep learning requires larger datasets to learn comparable representations.",
+        "<b>Class imbalance impact:</b> Plasma OFF is only 12.1% of data. "
+        "Despite balanced class weights, OFF recall = 0.61 (39% missed). "
+        "The model is conservative in predicting OFF states, preferring "
+        "high-confidence ON predictions (recall = 0.99).",
+        "<b>Attention-LSTM underperforms (74.4%):</b> Temporal sequence "
+        "classification on PCA(20) sliding windows loses spectral detail. "
+        "Direct spectral classification (SVM/RF on 3,648 channels) retains "
+        "full wavelength information, explaining the 20% accuracy gap.",
+        "<b>Species detection validates physics:</b> Ar I (69.8%) and F I "
+        "(68.4%) are dominant &mdash; consistent with SF<sub>6</sub>/Ar "
+        "process gas. C<sub>2</sub> Swan (23.8%) only appears during "
+        "C<sub>4</sub>F<sub>8</sub> passivation steps.",
+    ]
+    for a in analyses:
+        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
+                       _sty("analysis_item", 16, C_TEXT, leading=19))
+        y -= dy + 2 * mm
 
 
 # ══════════════════════════════════════════════════════════════════
