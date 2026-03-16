@@ -660,62 +660,30 @@ def panel_classification(c):
                             ])
     y -= dy + 3 * mm
 
-    # Model architecture details
-    dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
-                   _sty("arch_h", 18, C_NAV, bold=True))
-    y -= dy + 1.5 * mm
-
-    archs = [
-        "<b>SVM/RF:</b> StandardScaler \u2192 Classifier pipeline. RF uses 200 trees; "
-        "SVM uses RBF kernel (C=10, \u03b3=scale). Both with balanced class weights.",
-        "<b>CNN:</b> 3-layer Conv1D (32\u219264\u2192128 channels, kernel 7/5/3) "
-        "\u2192 AdaptiveAvgPool \u2192 FC(64) \u2192 Dropout(0.3) \u2192 output. "
-        "Weighted CrossEntropyLoss, mini-batch training.",
-        "<b>Transformer:</b> ViT-style 1D patch embedding (patch=64, d=128, 4 heads, "
-        "3 layers). [CLS] token classification. AdamW + cosine LR schedule.",
-        "<b>Attention-LSTM:</b> 2-layer LSTM (hidden=64) \u2192 additive attention "
-        "\u2192 FC. Trained on PCA(20) sliding windows (seq_len=10).",
-    ]
-    for a in archs:
-        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("arch_item", 16, C_TEXT, leading=17))
-        y -= dy + 1.5 * mm
-
-    # Results analysis
+    # Analysis (condensed)
     dy = draw_para(c, "<b>Analysis:</b>", x, y, w,
-                   _sty("analysis_h", 18, C_NAV, bold=True))
+                   _sty("analysis_h", 16, C_NAV, bold=True))
     y -= dy + 1.5 * mm
 
     analyses = [
-        "<b>Traditional ML &gt; Deep Learning:</b> SVM/RF achieve 94.2% vs "
-        "CNN 93.2% and Transformer 92.5%. The plasma ON/OFF decision boundary "
-        "is near-linear in feature space, giving kernel methods the advantage. "
-        "Deep learning requires larger datasets to learn comparable representations.",
-        "<b>Class imbalance impact:</b> Plasma OFF is only 12.1% of data. "
-        "Despite balanced class weights, OFF recall = 0.61 (39% missed). "
-        "The model is conservative in predicting OFF states, preferring "
-        "high-confidence ON predictions (recall = 0.99).",
-        "<b>Attention-LSTM underperforms (74.4%):</b> Temporal sequence "
-        "classification on PCA(20) sliding windows loses spectral detail. "
-        "Direct spectral classification (SVM/RF on 3,648 channels) retains "
-        "full wavelength information, explaining the 20% accuracy gap.",
-        "<b>Species detection validates physics:</b> Ar I (69.8%) and F I "
-        "(68.4%) are dominant &mdash; consistent with SF6/Ar "
-        "process gas. C2 Swan (23.8%) only appears during "
-        "C4F8 passivation steps.",
+        "<b>ML &gt; DL:</b> SVM/RF 94.2% vs CNN 93.2%, Transformer 92.5%. "
+        "Near-linear boundary favours kernel methods over deep learning.",
+        "<b>Class imbalance:</b> OFF only 12.1%. OFF recall=0.61; "
+        "ON recall=0.99. Balanced weights mitigate but don't eliminate bias.",
+        "<b>LSTM gap (74.4%):</b> PCA(20) windows lose spectral detail vs "
+        "full 3,648-channel classification.",
+        "<b>Physics validation:</b> Ar/F dominant (SF6/Ar gas), C2 only "
+        "during C4F8 passivation.",
     ]
     for a in analyses:
-        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("analysis_item", 16, C_TEXT, leading=19))
-        y -= dy + 2 * mm
+        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm, S_SMALL)
+        y -= dy + 1.5 * mm
 
-    # MC-Dropout uncertainty quantification
+    # MC-Dropout (condensed)
     mc_text = (
-        "<b>Uncertainty quantification:</b> MC-Dropout (50 stochastic forward passes) "
-        "estimates prediction confidence. Temperature Scaling calibrates output "
-        "probabilities. ECE = <b>0.004</b> (0.4% calibration error) &mdash; "
-        "\"90% confident\" predictions are correct 90% of the time. Enables "
-        "automatic flagging of low-confidence samples for human review."
+        "<b>Uncertainty:</b> MC-Dropout (50 passes) + Temperature Scaling. "
+        "ECE = <b>0.004</b> (0.4% calibration error). Enables automatic "
+        "flagging of low-confidence predictions for human review."
     )
     draw_para(c, mc_text, x, y, w, S_SMALL)
 
@@ -736,85 +704,57 @@ def panel_interpretability(c, shap_img):
                     preserveAspectRatio=True, mask="auto")
         y -= img_h + 4 * mm
 
+    # SHAP interpretation
     text1 = (
-        "F I (fluorine radical) identified as the most discriminative "
-        "species \u2014 consistent with its role as the primary etchant "
-        "in SF6 plasma."
+        "F I (fluorine radical) = most discriminative species, "
+        "consistent with its role as the primary SF6 etchant."
     )
-    dy = draw_para(c, text1, x, y, w, S_BODY)
-    y -= dy + 4 * mm
+    dy = draw_para(c, text1, x, y, w, S_SMALL)
+    y -= dy + 3 * mm
 
     # Key finding box
     finding = (
         "<b>Root Cause Discovery:</b> Etch/passivation spectral difference "
         "&lt; 0.35\u03c3 (indistinguishable). RF power ON/OFF provides "
-        "0.56\u03c3 separation. Classification improved 74% \u2192 94%."
+        "0.56\u03c3 separation. Classification: 74% &rarr; <b>94%</b>."
     )
-    p_tmp = Paragraph(finding, S_BODY)
-    _, fh = p_tmp.wrap(w - 6 * mm, 999 * mm)
-    box_h = fh + 6 * mm
-    rrect(c, x - 2 * mm, y - box_h, w + 4 * mm, box_h,
-          r=3 * mm, fill=HexColor("#e8f4fd"))
-    draw_para(c, finding, x + 1 * mm, y - 3 * mm, w - 4 * mm, S_BODY)
-    y -= box_h + 5 * mm
+    p_tmp = Paragraph(finding, S_SMALL)
+    _, fh = p_tmp.wrap(w - 4 * mm, 999 * mm)
+    box_h = fh + 4 * mm
+    rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
+          r=2 * mm, fill=HexColor("#e8f4fd"))
+    draw_para(c, finding, x + 1 * mm, y - 2 * mm, w - 4 * mm, S_SMALL)
+    y -= box_h + 4 * mm
 
-    # Boltzmann result
-    boltz = (
-        "<b>Boltzmann T_exc:</b> Excitation temperature "
-        "= <b>13,334 K</b> (Boltzmann plot, 6 Ar I lines, 696.5\u2013772.4 nm). "
-        "Estimated via linear regression of ln(I\u00b7\u03bb/gA) vs E_upper."
+    # Boltzmann + F I physics (merged, condensed)
+    boltz_fi = (
+        "<b>Boltzmann T_exc = 13,334 K</b> (6 Ar I lines, 696.5-772.4 nm). "
+        "F I dominance explained by SF6 dissociation: "
+        "SF6 + e- &rarr; SF5 + F + e-. "
+        "F I 703.7 nm has high transition probability "
+        "(A = 6.4 x 10^7 /s), directly tracks F radical density."
     )
-    dy = draw_para(c, boltz, x, y, w, S_SMALL)
+    dy = draw_para(c, boltz_fi, x, y, w, S_SMALL)
     y -= dy + 3 * mm
 
-    # Physics of F_I dominance
-    fi_physics = (
-        "<b>Why F I dominates:</b> In SF6 plasma, electron-impact "
-        "dissociation produces F radicals "
-        "(SF6 + e- &rarr; SF5 + F + e-). "
-        "The F I 703.7 nm line (2p4 3p &rarr; 2p4 3s transition, "
-        "upper state 14.5 eV) has high transition probability "
-        "(A = 6.4 x 10^7 /s) "
-        "and is well-separated from neighbouring lines. Its intensity directly tracks "
-        "F radical density, making it the most sensitive probe of etch chemistry."
-    )
-    dy = draw_para(c, fi_physics, x, y, w, _sty("fi_phys", 17, C_TEXT, leading=19))
-    y -= dy + 3 * mm
-
-    # Actinometry explanation
+    # Actinometry (condensed)
     actin = (
-        "<b>Actinometry:</b> Species concentration proportional to "
-        "I_target / I_Ar (Coburn &amp; Chen 1980). "
-        "Ar carrier gas at known constant flow serves as reference. "
-        "F/Ar ratio = 1.07 +/- 0.04; "
-        "C2/Ar ratio = 1.13 +/- 0.20 (largest variability "
-        "&mdash; reflects etch/passivation cycling)."
+        "<b>Actinometry:</b> I_target / I_Ar ratio (Coburn &amp; Chen 1980). "
+        "F/Ar = 1.07 +/- 0.04; C2/Ar = 1.13 +/- 0.20 "
+        "(C2 variability reflects etch/passivation cycling)."
     )
     dy = draw_para(c, actin, x, y, w, S_SMALL)
     y -= dy + 3 * mm
 
-    # Temporal analysis
-    temporal = (
-        "<b>Temporal analysis:</b> Attention-LSTM achieves <b>74.4%</b> "
-        "phase classification accuracy on PCA(20) embedding sequences. "
-        "Attention weights reveal that transition timesteps between plasma "
-        "states carry highest diagnostic information."
+    # Temporal + DTW (merged, condensed)
+    temporal_dtw = (
+        "<b>Temporal:</b> Attention-LSTM <b>74.4%</b> phase classification "
+        "on PCA(20) sequences. Attention weights highlight transition timesteps. "
+        "<b>DTW K-Means (k=4)</b> discovers ignition/steady-state/transition/"
+        "extinction phases. F I 684 nm emission ratio <b>2.04x</b> between "
+        "clusters &mdash; enables unsupervised anomaly detection."
     )
-    dy = draw_para(c, temporal, x, y, w, S_SMALL)
-    y -= dy + 3 * mm
-
-    # DTW clustering detail
-    dtw_text = (
-        "<b>DTW 4-Phase Clustering:</b> Dynamic Time Warping K-Means "
-        "(k=4) on PCA embedding discovers 4 natural discharge phases: "
-        "ignition, steady-state, transition, extinction. "
-        "The 684 nm emission intensity (F I) differs by <b>2.04x</b> between "
-        "clusters, confirming that clustering captures real chemical state "
-        "differences (F radical density varies 2x between ignition and "
-        "steady-state). Enables unsupervised anomaly detection: deviation "
-        "from normal cluster = process excursion."
-    )
-    draw_para(c, dtw_text, x, y, w, S_SMALL)
+    draw_para(c, temporal_dtw, x, y, w, S_SMALL)
 
 
 # ══════════════════════════════════════════════════════════════════
