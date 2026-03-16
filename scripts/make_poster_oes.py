@@ -745,13 +745,20 @@ def panel_classification(c, model_comp_img, per_class_img):
                             ])
     y -= dy + 3 * mm
 
-    # Condensed analysis (2 key points only)
-    analysis = (
-        "<b>Key findings:</b> Traditional ML outperforms DL (near-linear boundary). "
-        "OFF recall=0.61 due to 12.1% class imbalance. LSTM (74.4%) loses "
-        "spectral detail via PCA(20) compression."
-    )
-    draw_para(c, analysis, x, y, w, S_SMALL)
+    # Model architectures (compact)
+    dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
+                   _sty("arch_h2", 16, C_NAV, bold=True))
+    y -= dy + 1 * mm
+
+    archs = [
+        "<b>SVM/RF:</b> StandardScaler + RBF kernel (C=10) / 200 trees. Balanced weights.",
+        "<b>CNN:</b> Conv1D(32-64-128) + AdaptiveAvgPool + FC(64) + Dropout(0.3).",
+        "<b>Transformer:</b> 1D patch(64), d=128, 4 heads, 3 layers. [CLS] + AdamW.",
+        "<b>Att-LSTM:</b> 2-layer LSTM(64) + additive attention. PCA(20) windows.",
+    ]
+    for a in archs:
+        dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm, S_REF)
+        y -= dy + 1 * mm
 
 
 # ══════════════════════════════════════════════════════════════════
