@@ -413,6 +413,31 @@ def panel_method(c):
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
               x, y, w, note_style)
+    y -= 14
+
+    # Key Design Decisions callout box
+    kdd_title = "<b>Key Design Decisions</b>"
+    dy = draw_para(c, kdd_title, x, y, w,
+                   _sty("kdd_t", 10, C_NAV, bold=True, leading=13))
+    y -= dy + 2 * mm
+
+    decisions = [
+        "<b>Per-element model routing:</b> Different plasma species require "
+        "different model architectures. Cr uses Ridge+PCA (avoids overfitting "
+        "on 976 NIST lines); other elements use ANN+NIST windows.",
+        "<b>GroupKFold CV:</b> Prevents same-target spectra leaking between "
+        "train/test folds. Forces model to generalise across physical samples, "
+        "not memorise measurement noise.",
+        "<b>Balanced class weights:</b> Plasma OFF samples are only 12.1% of "
+        "data. Class-weighted loss prevents majority-class bias in all classifiers.",
+        "<b>NMF over PCA:</b> Non-negative components are physically interpretable "
+        "as pure-species emission spectra. PCA components can be negative, "
+        "violating emission physics.",
+    ]
+    for d in decisions:
+        dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
+                       _sty("kdd_item", 9, C_TEXT, leading=11.5))
+        y -= dy + 2 * mm
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -438,31 +463,46 @@ def panel_species(c, species_img):
     x, y, w = _panel_chrome(c, 2, 0, "3. Species Identification")
 
     intro = (
-        "NMF decomposes mixed spectra into pure-species spectral components. "
-        "Detected peaks are matched to NIST Atomic Spectra Database."
+        "<b>Non-negative Matrix Factorization (NMF)</b> decomposes the spectral "
+        "matrix <b>X \u2248 W \u00b7 H</b>, where each row of <b>H</b> is a "
+        "pure-species emission spectrum and <b>W</b> contains the corresponding "
+        "concentrations. NMF is physically appropriate because emission "
+        "intensities are inherently non-negative."
     )
-    dy = draw_para(c, intro, x, y, w, S_BODY)
-    y -= dy + 4 * mm
+    dy = draw_para(c, intro, x, y, w, S_SMALL)
+    y -= dy + 2 * mm
 
-    # Species detection chart
+    # Species detection chart FIRST (before table)
     if species_img:
         img_w = w
-        img_h = img_w * 0.56
+        img_h = img_w * 0.50
         c.drawImage(species_img, x, y - img_h,
                     width=img_w, height=img_h,
                     preserveAspectRatio=True, mask="auto")
-        y -= img_h + 4 * mm
+        y -= img_h + 3 * mm
 
-    # Key emission lines table
-    y -= 2 * mm
-    _draw_simple_table(c, x, y, w,
+    # Compact emission lines table (top 4 species only to save space)
+    dy = _draw_simple_table(c, x, y, w,
                        headers=["Species", "Lines (nm)", "Origin"],
-                       col_fracs=[0.22, 0.38, 0.40],
+                       col_fracs=[0.18, 0.42, 0.40],
                        rows=[
-                           ["F I", "685.6, 703.7", "SF6 etchant"],
-                           ["Ar I", "750.4, 763.5", "Carrier gas"],
-                           ["C2 Swan", "516.5, 563.6", "C4F8 product"],
+                           ["F I", "685.6, 690.2, 703.7", "SF6 etchant radical"],
+                           ["Ar I", "696.5, 750.4, 763.5", "Carrier gas reference"],
+                           ["C2 Swan", "473.7, 516.5, 563.6", "C4F8 carbon indicator"],
+                           ["CO", "451.1, 519.8, 561.0", "C4F8 + O2 product"],
+                           ["Si I", "250.7, 252.4, 288.2", "Si etch product"],
+                           ["SiF", "440.0, 442.5", "Si + F recombination"],
                        ])
+    y -= dy + 2 * mm
+
+    # NMF validation note
+    nmf_note = (
+        "<b>Validation:</b> NMF Component 0 peaks at 684.4 nm "
+        "(\u2248 F I 685.6); Component 2 at 515.1 nm "
+        "(\u2248 C\u2082 Swan 516.5) \u2014 unsupervised decomposition "
+        "confirms NIST species independently."
+    )
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 9, C_SUB, leading=11))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -567,10 +607,35 @@ def panel_interpretability(c, shap_img):
 
     # Boltzmann result
     boltz = (
-        "<b>Boltzmann result:</b> Excitation temperature "
-        "T<sub>exc</sub> = 13,334 K (Boltzmann plot, 6 Ar I lines)"
+        "<b>Boltzmann T<sub>exc</sub>:</b> Excitation temperature "
+        "= <b>13,334 K</b> (Boltzmann plot, 6 Ar I lines, 696.5\u2013772.4 nm). "
+        "Estimated via linear regression of ln(I\u00b7\u03bb/gA) vs E<sub>upper</sub>."
     )
-    draw_para(c, boltz, x, y, w, S_BODY)
+    dy = draw_para(c, boltz, x, y, w, S_SMALL)
+    y -= dy + 3 * mm
+
+    # Actinometry explanation
+    actin = (
+        "<b>Actinometry:</b> Species concentration \u221d I<sub>target</sub> / "
+        "I<sub>Ar</sub> (Coburn &amp; Chen 1980). Ar carrier gas at known "
+        "constant flow serves as reference. F/Ar ratio = 1.07 \u00b1 0.04; "
+        "C\u2082/Ar ratio = 1.13 \u00b1 0.20 (largest variability \u2014 "
+        "reflects etch/passivation cycling)."
+    )
+    dy = draw_para(c, actin, x, y, w, S_SMALL)
+    y -= dy + 3 * mm
+
+    # Temporal analysis
+    temporal = (
+        "<b>Temporal analysis:</b> Attention-LSTM achieves <b>74.4%</b> "
+        "phase classification accuracy on PCA(20) embedding sequences. "
+        "Attention weights reveal that transition timesteps between plasma "
+        "states carry highest diagnostic information. "
+        "DTW K-Means identifies 4 discharge phases (ignition, steady-state, "
+        "transition, extinction) with 684 nm emission ratio &gt; 2\u00d7 "
+        "between clusters."
+    )
+    draw_para(c, temporal, x, y, w, S_SMALL)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -585,11 +650,17 @@ def panel_conclusions(c):
     y -= dy + 2 * mm
 
     achievements = [
-        "Automated species detection pipeline identifying 13 plasma species from NIST database",
-        "94.2% plasma state classification with 6 ML models compared",
-        "SHAP confirms F I as primary discriminator (physically validated)",
-        "Data-driven label correction methodology (gas flow \u2192 RF power)",
-        "78 automated tests, fully reproducible CLI pipeline",
+        "Automated species detection: 13 plasma species, 39 NIST emission lines, "
+        "NMF decomposition validates against database",
+        "94.2% plasma state classification (SVM/RF best; CNN 93.2%, "
+        "Transformer 92.5% \u2014 6 models compared)",
+        "SHAP interpretability: F I importance = 0.131 (3\u00d7 next species), "
+        "physically validated as primary SF\u2086 etchant radical",
+        "Data-driven label correction: gas-flow labels (74%) \u2192 RF-power "
+        "labels (94%) via root-cause spectral analysis",
+        "Temperature regression: T<sub>rot</sub> RMSE = 20.0 K, "
+        "T<sub>vib</sub> = 102.0 K (Mesbah CAP dataset)",
+        "78 automated tests, 6 CLI task modes, fully reproducible pipeline",
     ]
     for a in achievements:
         dy = draw_para(c, f"&#10003;&nbsp; {a}", x + 2 * mm, y, w - 4 * mm, S_SMALL)
