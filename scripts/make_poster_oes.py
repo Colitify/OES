@@ -456,29 +456,43 @@ def panel_intro(c, spectrum_img):
         x, y, w, S_BODY_L)
     y -= dy + 3 * mm
 
-    # 4 numbered aims
-    aims = [
-        "<b>Spectral feature identification</b> \u2014 automated peak detection, "
-        "NMF decomposition, NIST database matching",
-        "<b>Plasma species classification</b> \u2014 SVM, RF, CNN, Transformer "
-        "comparison (6 models)",
-        "<b>Spatiotemporal evolution</b> \u2014 Attention-LSTM phase prediction, "
-        "species time-series extraction",
-        "<b>Semi-quantitative intensity</b> \u2014 actinometry (Coburn &amp; Chen 1980), "
-        "Boltzmann Te estimation",
+    # 4 objectives as horizontal flowchart boxes
+    objectives = [
+        ("1. Feature ID", "Peak detection\nNMF + NIST", HexColor("#2980b9")),
+        ("2. Classification", "SVM/RF/CNN\nTransformer (6)", HexColor("#8e44ad")),
+        ("3. Temporal", "Attention-LSTM\nSpecies series", HexColor("#27ae60")),
+        ("4. Intensity", "Actinometry\nBoltzmann Te", HexColor("#e67e22")),
     ]
-    for i, aim in enumerate(aims):
-        bullet = f"<b>{i+1}.</b>&nbsp; {aim}"
-        dy = draw_para(c, bullet, x + 3 * mm, y, w - 6 * mm, S_SMALL_L)
-        y -= dy + 2 * mm
-
-    y -= 2 * mm
-    dy = draw_para(c,
-        "<b>Industrial relevance:</b> Enables real-time closed-loop control of "
-        "plasma processes in semiconductor fabrication, reducing defect rates "
-        "and improving yield.",
-        x, y, w, S_SMALL_L)
-    y -= dy + 3 * mm
+    obj_w = (w - 3 * 4 * mm) / 4  # 4 boxes with 4mm gaps
+    obj_h = 28 * mm
+    obj_x = x
+    for i, (title, desc, color) in enumerate(objectives):
+        bx = obj_x + i * (obj_w + 4 * mm)
+        rrect(c, bx, y - obj_h, obj_w, obj_h, r=3 * mm, fill=color)
+        # Title
+        c.setFillColor(white)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(bx + obj_w / 2, y - 9 * mm, title)
+        # Description
+        c.setFont("Helvetica", 9)
+        lines = desc.split("\n")
+        for j, line in enumerate(lines):
+            c.drawCentredString(bx + obj_w / 2, y - 15 * mm - j * 10, line)
+        # Arrow between boxes
+        if i < 3:
+            arrow_x = bx + obj_w
+            arrow_y = y - obj_h / 2
+            c.setStrokeColor(C_TEXT)
+            c.setFillColor(C_TEXT)
+            c.setLineWidth(1.2)
+            c.line(arrow_x + 0.5 * mm, arrow_y, arrow_x + 3.5 * mm, arrow_y)
+            p = c.beginPath()
+            p.moveTo(arrow_x + 4 * mm, arrow_y)
+            p.lineTo(arrow_x + 2.5 * mm, arrow_y + 1.5 * mm)
+            p.lineTo(arrow_x + 2.5 * mm, arrow_y - 1.5 * mm)
+            p.close()
+            c.drawPath(p, fill=1, stroke=0)
+    y -= obj_h + 3 * mm
 
     dy = draw_para(c, "<b>Three public datasets:</b>",
                    x, y, w, S_BODY_L)
