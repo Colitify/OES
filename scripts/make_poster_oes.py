@@ -100,11 +100,11 @@ def _sty(name, sz, color=C_TEXT, bold=False, align=TA_LEFT, leading=None):
     )
 
 
-S_BODY = _sty("body", 13, leading=17)
-S_SMALL = _sty("small", 12, leading=16)
-S_TABLE = _sty("table", 12, leading=15)
-S_REF = _sty("ref", 11, leading=14)
-S_CAP = _sty("cap", 11, C_SUB, align=TA_CENTER)
+S_BODY = _sty("body", 14, leading=18)
+S_SMALL = _sty("small", 13, leading=17)
+S_TABLE = _sty("table", 13, leading=16)
+S_REF = _sty("ref", 12, leading=15)
+S_CAP = _sty("cap", 12, C_SUB, align=TA_CENTER)
 
 
 def draw_para(c, text, x, y, w, style):
@@ -233,9 +233,9 @@ def make_spectrum_plot():
     peaks = {
         'F I': (685.6, 1200, 3),
         'Ar I': (750.4, 1800, 2.5),
-        'C\u2082': (516.5, 800, 5),
+        'C2': (516.5, 800, 5),
         'CO': (519.8, 600, 4),
-        'H\u03b1': (656.3, 400, 3),
+        'Ha': (656.3, 400, 3),
         'O I': (777.4, 500, 2),
     }
     for name, (center, height, width) in peaks.items():
@@ -475,7 +475,7 @@ def panel_method(c):
             y -= arrow_gap
 
     y -= 5 * mm
-    note_style = _sty("optuna_note", 11, C_SUB, leading=14)
+    note_style = _sty("optuna_note", 13, C_SUB, leading=16)
     draw_para(c,
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
@@ -485,7 +485,7 @@ def panel_method(c):
     # Key Design Decisions callout box
     kdd_title = "<b>Key Design Decisions</b>"
     dy = draw_para(c, kdd_title, x, y, w,
-                   _sty("kdd_t", 12, C_NAV, bold=True, leading=15))
+                   _sty("kdd_t", 14, C_NAV, bold=True, leading=17))
     y -= dy + 2 * mm
 
     decisions = [
@@ -503,7 +503,7 @@ def panel_method(c):
     ]
     for d in decisions:
         dy = draw_para(c, f"\u2022&nbsp; {d}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("kdd_item", 11, C_TEXT, leading=14))
+                       _sty("kdd_item", 13, C_TEXT, leading=16))
         y -= dy + 2 * mm
 
     y -= 3 * mm
@@ -516,7 +516,7 @@ def panel_method(c):
         "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
         "11-channel local window)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 11, C_TEXT, leading=14))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 13, C_TEXT, leading=16))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -554,10 +554,10 @@ def panel_species(c, species_img):
     dy = draw_para(c,
         "<b>Automated NIST matching:</b> Each detected peak is compared against "
         "39 reference emission lines from 13 species. The algorithm selects the "
-        "closest database match within \u00b11.5 nm tolerance. Species with "
+        "closest database match within +/-1.5 nm tolerance. Species with "
         "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
         "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 11, C_TEXT, leading=14))
+        x, y, w, _sty("nist_detail", 13, C_TEXT, leading=16))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -587,10 +587,10 @@ def panel_species(c, species_img):
     nmf_note = (
         "<b>Validation:</b> NMF Component 0 peaks at 684.4 nm "
         "(\u2248 F I 685.6); Component 2 at 515.1 nm "
-        "(\u2248 C\u2082 Swan 516.5) \u2014 unsupervised decomposition "
+        "(approx. C<sub>2</sub> Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 11, C_SUB, leading=14))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 13, C_SUB, leading=16))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -635,7 +635,7 @@ def panel_classification(c):
 
     # Per-species detection rates table
     dy = draw_para(c, "<b>Species Detection Rates (13 species, 15,000 spectra):</b>",
-                   x, y, w, _sty("sp_hdr", 12, C_NAV, bold=True))
+                   x, y, w, _sty("sp_hdr", 14, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     dy = _draw_simple_table(c, x, y, w,
@@ -650,7 +650,7 @@ def panel_classification(c):
 
     # Model architecture details
     dy = draw_para(c, "<b>Model Architectures:</b>", x, y, w,
-                   _sty("arch_h", 12, C_NAV, bold=True))
+                   _sty("arch_h", 14, C_NAV, bold=True))
     y -= dy + 1.5 * mm
 
     archs = [
@@ -666,7 +666,7 @@ def panel_classification(c):
     ]
     for a in archs:
         dy = draw_para(c, f"\u2022 {a}", x + 1 * mm, y, w - 2 * mm,
-                       _sty("arch_item", 10.5, C_TEXT, leading=13))
+                       _sty("arch_item", 12, C_TEXT, leading=15))
         y -= dy + 1.5 * mm
 
     note = (
@@ -725,23 +725,26 @@ def panel_interpretability(c, shap_img):
 
     # Physics of F_I dominance
     fi_physics = (
-        "<b>Why F I dominates:</b> In SF\u2086 plasma, electron-impact "
-        "dissociation produces F radicals (SF\u2086 + e\u207b \u2192 SF\u2085 + F + e\u207b). "
-        "The F I 703.7 nm line (2p\u2074 3p \u2192 2p\u2074 3s transition, "
-        "upper state 14.5 eV) has high transition probability (A = 6.4\u00d710\u2077 s\u207b\u00b9) "
+        "<b>Why F I dominates:</b> In SF<sub>6</sub> plasma, electron-impact "
+        "dissociation produces F radicals "
+        "(SF<sub>6</sub> + e<super>-</super> &rarr; SF<sub>5</sub> + F + e<super>-</super>). "
+        "The F I 703.7 nm line (2p<super>4</super>3p &rarr; 2p<super>4</super>3s transition, "
+        "upper state 14.5 eV) has high transition probability "
+        "(A = 6.4 &times; 10<super>7</super> s<super>-1</super>) "
         "and is well-separated from neighbouring lines. Its intensity directly tracks "
         "F radical density, making it the most sensitive probe of etch chemistry."
     )
-    dy = draw_para(c, fi_physics, x, y, w, _sty("fi_phys", 11, C_TEXT, leading=14))
+    dy = draw_para(c, fi_physics, x, y, w, _sty("fi_phys", 13, C_TEXT, leading=17))
     y -= dy + 3 * mm
 
     # Actinometry explanation
     actin = (
-        "<b>Actinometry:</b> Species concentration \u221d I<sub>target</sub> / "
-        "I<sub>Ar</sub> (Coburn &amp; Chen 1980). Ar carrier gas at known "
-        "constant flow serves as reference. F/Ar ratio = 1.07 \u00b1 0.04; "
-        "C\u2082/Ar ratio = 1.13 \u00b1 0.20 (largest variability \u2014 "
-        "reflects etch/passivation cycling)."
+        "<b>Actinometry:</b> Species concentration proportional to "
+        "I<sub>target</sub> / I<sub>Ar</sub> (Coburn &amp; Chen 1980). "
+        "Ar carrier gas at known constant flow serves as reference. "
+        "F/Ar ratio = 1.07 +/- 0.04; "
+        "C<sub>2</sub>/Ar ratio = 1.13 +/- 0.20 (largest variability "
+        "&mdash; reflects etch/passivation cycling)."
     )
     dy = draw_para(c, actin, x, y, w, S_SMALL)
     y -= dy + 3 * mm
@@ -753,7 +756,7 @@ def panel_interpretability(c, shap_img):
         "Attention weights reveal that transition timesteps between plasma "
         "states carry highest diagnostic information. "
         "DTW K-Means identifies 4 discharge phases (ignition, steady-state, "
-        "transition, extinction) with 684 nm emission ratio &gt; 2\u00d7 "
+        "transition, extinction) with 684 nm emission ratio &gt; 2x "
         "between clusters."
     )
     draw_para(c, temporal, x, y, w, S_SMALL)
@@ -767,7 +770,7 @@ def panel_conclusions(c):
     x, y, w = _panel_chrome(c, 2, 1, "6. Conclusions & Further Work")
 
     dy = draw_para(c, "<b>Key Achievements:</b>", x, y, w,
-                   _sty("ka", 11, C_NAV, bold=True))
+                   _sty("ka", 14, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     achievements = [
@@ -775,8 +778,8 @@ def panel_conclusions(c):
         "NMF decomposition validates against database",
         "94.2% plasma state classification (SVM/RF best; CNN 93.2%, "
         "Transformer 92.5% \u2014 6 models compared)",
-        "SHAP interpretability: F I importance = 0.131 (3\u00d7 next species), "
-        "physically validated as primary SF\u2086 etchant radical",
+        "SHAP interpretability: F I importance = 0.131 (3x next species), "
+        "physically validated as primary SF<sub>6</sub> etchant radical",
         "Data-driven label correction: gas-flow labels (74%) \u2192 RF-power "
         "labels (94%) via root-cause spectral analysis",
         "Temperature regression: T<sub>rot</sub> RMSE = 20.0 K, "
@@ -789,11 +792,11 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Limitations:</b>", x, y, w,
-                   _sty("lim", 11, C_NAV, bold=True))
+                   _sty("lim", 14, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     limitations = [
-        "OES\u2192process parameter regression failed (R\u00b2 &lt; 0, causal irreversibility)",
+        "OES&rarr;process parameter regression failed (R<super>2</super> &lt; 0, causal irreversibility)",
         "Boltzmann T<sub>e</sub> limited by narrow Ar I energy spread (0.33 eV)",
         "Spatial etch prediction lacks wafer ID alignment",
     ]
@@ -803,7 +806,7 @@ def panel_conclusions(c):
 
     y -= 3 * mm
     dy = draw_para(c, "<b>Further Work:</b>", x, y, w,
-                   _sty("fw", 11, C_NAV, bold=True))
+                   _sty("fw", 14, C_NAV, bold=True))
     y -= dy + 2 * mm
 
     further = [
@@ -823,18 +826,18 @@ def panel_conclusions(c):
         "78 automated tests | 32 development stories | 23 literature references | "
         "6 CLI task modes | 3 public datasets"
     )
-    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 11, C_TEXT, leading=14))
+    p_tmp = Paragraph(metrics_box, _sty("met_tmp", 13, C_TEXT, leading=16))
     _, mh = p_tmp.wrap(w - 4 * mm, 999 * mm)
     box_h = mh + 4 * mm
     rrect(c, x - 1 * mm, y - box_h, w + 2 * mm, box_h,
           r=2 * mm, fill=HexColor("#e8f4fd"))
     draw_para(c, metrics_box, x + 1 * mm, y - 2 * mm, w - 4 * mm,
-              _sty("met_box", 11, C_TEXT, leading=14))
+              _sty("met_box", 13, C_TEXT, leading=16))
     y -= box_h + 3 * mm
 
     y -= 4 * mm
     dy = draw_para(c, "<b>References:</b>", x, y, w,
-                   _sty("refs_hdr", 12, C_NAV, bold=True))
+                   _sty("refs_hdr", 14, C_NAV, bold=True))
     y -= dy + 1 * mm
 
     refs = [
@@ -866,7 +869,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     c.setFillColor(C_NAV)
     c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 11)
+    c.setFont("Helvetica-Bold", 12)
     cx = x
     for j, hdr in enumerate(headers):
         c.drawCentredString(cx + cw[j] / 2, y - hdr_h + 2.5 * mm, hdr)
@@ -880,7 +883,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
         c.rect(x, ry, w, row_h, fill=1, stroke=0)
         cx = x
         for j, cell in enumerate(row):
-            c.setFont("Helvetica", 11)
+            c.setFont("Helvetica", 12)
             c.setFillColor(C_TEXT)
             c.drawCentredString(cx + cw[j] / 2, ry + 2 * mm, cell)
             cx += cw[j]
