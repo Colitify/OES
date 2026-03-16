@@ -615,12 +615,9 @@ def panel_method(c):
     y -= 3 * mm
     # Preprocessing details
     prep_detail = (
-        "<b>Preprocessing rationale:</b> ALS baseline (\u03bb=10<super>5</super>) "
-        "removes fluorescence continuum. Savitzky-Golay (window=11, order=3) "
-        "preserves peak shapes while reducing shot noise. SNV normalisation "
-        "corrects for optical path length variation between measurements. "
-        "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
-        "11-channel local window)."
+        "<b>Preprocessing:</b> Cosmic ray removal (5\u03c3 Z-score) &rarr; "
+        "ALS baseline &rarr; SavGol smoothing &rarr; SNV normalisation. "
+        "Average SNR gain: <b>10.99 dB</b> (12.6x improvement)."
     )
     draw_para(c, prep_detail, x, y, w, _sty("prep_d", 18, C_TEXT, leading=22))
 
