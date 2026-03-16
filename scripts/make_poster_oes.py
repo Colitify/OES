@@ -100,12 +100,13 @@ def _sty(name, sz, color=C_TEXT, bold=False, align=TA_LEFT, leading=None):
     )
 
 
-S_BODY = _sty("body", 24, leading=29)
-S_SMALL = _sty("small", 23, leading=28)
-S_TABLE = _sty("table", 23, leading=27)
-S_REF = _sty("ref", 21, leading=25)
-S_CAP = _sty("cap", 21, C_SUB, align=TA_CENTER)
+S_BODY = _sty("body", 21, leading=26)
+S_SMALL = _sty("small", 20, leading=25)
+S_TABLE = _sty("table", 20, leading=24)
+S_REF = _sty("ref", 18, leading=22)
+S_CAP = _sty("cap", 18, C_SUB, align=TA_CENTER)
 
+# Aliases (panels 1,3,4,5 previously used _L variants — now unified)
 S_BODY_L = S_BODY
 S_SMALL_L = S_SMALL
 
@@ -420,7 +421,7 @@ def _panel_chrome(c, col, row, title):
 
     # Header text (large, bold)
     c.setFillColor(C_NAV)
-    c.setFont("Helvetica-Bold", 25)
+    c.setFont("Helvetica-Bold", 22)
     c.drawString(x + PAD, y + h - HEADER_H + 1 * mm, title)
 
     # Thick navy line under header
@@ -549,7 +550,7 @@ def panel_method(c):
             rrect(c, box_x + 4 * mm, sub_y, box_w - 8 * mm, sub_h,
                   r=2 * mm, fill=lighter, stroke=color, stroke_width=0.8)
             # Wrap sub-label text
-            sub_style = _sty(f"sub_{i}", 19, C_TEXT, align=TA_CENTER, leading=22)
+            sub_style = _sty(f"sub_{i}", 16, C_TEXT, align=TA_CENTER, leading=15)
             draw_para(c, sub_labels[i],
                       box_x + 6 * mm, sub_y + sub_h - 2 * mm,
                       box_w - 12 * mm, sub_style)
@@ -564,7 +565,7 @@ def panel_method(c):
             y -= arrow_gap
 
     y -= 5 * mm
-    note_style = _sty("optuna_note", 23, C_SUB, leading=24)
+    note_style = _sty("optuna_note", 20, C_SUB, leading=24)
     draw_para(c,
               "<i>Hyperparameter optimisation: Optuna two-stage search "
               "(20 trials per target)</i>",
@@ -573,7 +574,7 @@ def panel_method(c):
 
     # Key Design Decisions table
     dy = draw_para(c, "<b>Key Design Decisions</b>", x, y, w,
-                   _sty("kdd_t", 25, C_NAV, bold=True, leading=26))
+                   _sty("kdd_t", 22, C_NAV, bold=True, leading=26))
     y -= dy + 2 * mm
 
     dy = _draw_simple_table(c, x, y, w,
@@ -597,7 +598,7 @@ def panel_method(c):
         "Cosmic ray removal uses Z-score median filter (threshold=5\u03c3, "
         "11-channel local window)."
     )
-    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 24, C_TEXT, leading=24))
+    draw_para(c, prep_detail, x, y, w, _sty("prep_d", 21, C_TEXT, leading=24))
 
 
 def _draw_arrow_down(c, cx, y_top, y_bot):
@@ -638,7 +639,7 @@ def panel_species(c, species_img):
         "closest database match within +/-1.5 nm tolerance. Species with "
         "peak intensity &gt; \u03bc + 3\u03c3 (global spectrum statistics) "
         "are classified as <i>present</i>.",
-        x, y, w, _sty("nist_detail", 24, C_TEXT, leading=24))
+        x, y, w, _sty("nist_detail", 21, C_TEXT, leading=24))
     y -= dy + 2 * mm
 
     # Species detection chart FIRST (before table)
@@ -671,7 +672,7 @@ def panel_species(c, species_img):
         "(approx. C2 Swan 516.5) &mdash; unsupervised decomposition "
         "confirms NIST species independently."
     )
-    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 24, C_SUB, leading=24))
+    draw_para(c, nmf_note, x, y, w, _sty("nmf_note", 21, C_SUB, leading=24))
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -685,7 +686,7 @@ def panel_classification(c, model_img, perclass_img):
     highlight_h = 14 * mm
     rrect(c, x - 2 * mm, y - highlight_h, w + 4 * mm, highlight_h,
           r=3 * mm, fill=C_HIGH_BG, stroke=C_UOL_RED, stroke_width=2.0)
-    sty_hl = _sty("highlight", 25, C_UOL_RED, bold=True, align=TA_CENTER,
+    sty_hl = _sty("highlight", 22, C_UOL_RED, bold=True, align=TA_CENTER,
                    leading=18)
     draw_para(c, "94.2% Accuracy (SVM/RF, 5-fold CV)",
               x, y - 3 * mm, w, sty_hl)
@@ -868,14 +869,14 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
     Returns total height consumed.
     """
     cw = [w * f for f in col_fracs]
-    hdr_h = 9 * mm
-    row_h = 8 * mm
+    hdr_h = 8 * mm
+    row_h = 7 * mm
 
     # Header row
     c.setFillColor(C_NAV)
     c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
     c.setFillColor(white)
-    c.setFont("Helvetica-Bold", 19)
+    c.setFont("Helvetica-Bold", 16)
     cx = x
     for j, hdr in enumerate(headers):
         c.drawCentredString(cx + cw[j] / 2, y - hdr_h + 2.5 * mm, hdr)
@@ -889,7 +890,7 @@ def _draw_simple_table(c, x, y, w, headers, col_fracs, rows):
         c.rect(x, ry, w, row_h, fill=1, stroke=0)
         cx = x
         for j, cell in enumerate(row):
-            c.setFont("Helvetica", 19)
+            c.setFont("Helvetica", 16)
             c.setFillColor(C_TEXT)
             c.drawCentredString(cx + cw[j] / 2, ry + 2 * mm, cell)
             cx += cw[j]
