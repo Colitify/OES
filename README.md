@@ -264,9 +264,6 @@ OES/
 │   └── 03_temporal_analysis.ipynb
 │
 ├── scripts/
-│   ├── ralph/
-│   │   ├── ralph.sh                # Automated story runner
-│   │   └── prd.json                # Story backlog (32 stories)
 │   ├── evaluate_cap.py
 │   ├── plot_temporal_pca.py
 │   ├── plot_clusters.py

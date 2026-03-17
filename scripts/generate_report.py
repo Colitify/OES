@@ -80,7 +80,7 @@ def main():
     lines.append("")
     lines.append(f"**Generated**: {timestamp}  ")
     lines.append(f"**Commit**: `{git_sha[:12]}`  ")
-    lines.append(f"**Branch**: `ralph/plasma-oes`")
+    lines.append(f"**Branch**: `main`")
     lines.append("")
 
     lines.append("---")

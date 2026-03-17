@@ -1,5 +1,5 @@
 """
-Guardrail script for Ralph-style iteration.
+Guardrail script for iterative experiment validation.
 
 Usage:
     python -m src.guardrail results/metrics.json [--tol 0.02]
@@ -72,7 +72,7 @@ def append_runs_csv(runs_path: Path, payload: Dict[str, Any], metric_name: str, 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Guardrail for Ralph iteration. Supports minimize (RMSE_mean) and maximize (micro_f1) modes."
+        description="Guardrail for iterative validation. Supports minimize (RMSE_mean) and maximize (micro_f1) modes."
     )
     parser.add_argument("metrics_json", type=str, help="Path to metrics.json")
     parser.add_argument("--best_path", type=str, default="results/best.json", help="Path to best.json")
