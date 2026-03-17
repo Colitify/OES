@@ -16,12 +16,16 @@ import numpy as np
 # Make src importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data_loader import load_libs_benchmark
 from src.evaluation import compute_snr_gain
 from scipy.signal import savgol_filter
 
 
 def main():
+    raise RuntimeError(
+        "snr_benchmark.py depends on load_libs_benchmark which was removed "
+        "in OES-029. This script needs updating to use OES datasets."
+    )
+
     parser = argparse.ArgumentParser(description="SNR benchmark for LIBS Benchmark spectra")
     parser.add_argument("--data", type=str, required=True,
                         help="Path to train.h5 or the directory containing it")
@@ -40,8 +44,8 @@ def main():
     else:
         data_dir = str(data_path)
 
-    print(f"Loading LIBS Benchmark from {data_dir}...")
-    X, y, wavelengths = load_libs_benchmark(data_dir, split="train")
+    print(f"Loading data from {data_dir}...")
+    X, y, wavelengths = None, None, None  # TODO: use OES dataset loader
     print(f"  Loaded: X={X.shape}, {len(set(y.tolist()))} classes")
 
     # Sample a subset

@@ -7,9 +7,7 @@ Usage:
     python scripts/generate_report.py
 """
 
-import json
 import shutil
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -18,20 +16,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 
-def get_git_sha() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
-
-
-def load_json(path):
-    p = Path(path)
-    if not p.exists():
-        return {}
-    return json.loads(p.read_text(encoding="utf-8"))
+from src.utils import get_git_sha, load_json
 
 
 def md_table(headers, rows, alignments=None):

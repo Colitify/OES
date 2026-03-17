@@ -16,6 +16,26 @@ except ImportError:
     OPTUNA_AVAILABLE = False
 
 
+def _run_optuna_study(objective, n_trials: int, seed: int = 42) -> Tuple[Dict[str, Any], float]:
+    """Run an Optuna study with standard boilerplate.
+
+    Args:
+        objective: Optuna objective function (trial -> float)
+        n_trials: Number of optimization trials
+        seed: Random seed for TPE sampler
+
+    Returns:
+        Tuple of (best_params, best_value)
+    """
+    if not OPTUNA_AVAILABLE:
+        raise ImportError("Optuna is required for optimization. Install with: pip install optuna")
+    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=seed))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+    return study.best_params, study.best_value
+
+
 def optimize_pls(
     X: np.ndarray,
     y: np.ndarray,
@@ -23,33 +43,14 @@ def optimize_pls(
     cv: int = 5,
     n_trials: int = 50
 ) -> Tuple[Dict[str, Any], float]:
-    """Optimize PLS using Optuna.
-
-    Args:
-        X: Feature matrix
-        y: Target matrix
-        n_components_range: Range for n_components
-        cv: Number of CV folds
-        n_trials: Number of optimization trials
-
-    Returns:
-        Tuple of (best_params, best_score)
-    """
-    if not OPTUNA_AVAILABLE:
-        raise ImportError("Optuna is required for optimization. Install with: pip install optuna")
-
+    """Optimize PLS using Optuna."""
     def objective(trial):
         n_components = trial.suggest_int("n_components", *n_components_range)
         model = PLSRegression(n_components=n_components)
         scores = cross_val_score(model, X, y, cv=cv, scoring="neg_root_mean_squared_error")
         return -scores.mean()
 
-    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-
-    return study.best_params, study.best_value
+    return _run_optuna_study(objective, n_trials)
 
 
 def optimize_ridge(
@@ -59,31 +60,14 @@ def optimize_ridge(
     cv: int = 5,
     n_trials: int = 100
 ) -> Tuple[Dict[str, Any], float]:
-    """Optimize Ridge using Optuna.
-
-    Args:
-        X: Feature matrix
-        y: Target matrix
-        alpha_range: Range for alpha (log scale)
-        cv: Number of CV folds
-        n_trials: Number of optimization trials
-
-    Returns:
-        Tuple of (best_params, best_score)
-    """
-    if not OPTUNA_AVAILABLE:
-        raise ImportError("Optuna is required for optimization")
-
+    """Optimize Ridge using Optuna."""
     def objective(trial):
         alpha = trial.suggest_float("alpha", *alpha_range, log=True)
         model = Ridge(alpha=alpha)
         scores = cross_val_score(model, X, y, cv=cv, scoring="neg_root_mean_squared_error")
         return -scores.mean()
 
-    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-
-    return study.best_params, study.best_value
+    return _run_optuna_study(objective, n_trials)
 
 
 def optimize_lasso(
@@ -94,19 +78,13 @@ def optimize_lasso(
     n_trials: int = 100
 ) -> Tuple[Dict[str, Any], float]:
     """Optimize Lasso using Optuna."""
-    if not OPTUNA_AVAILABLE:
-        raise ImportError("Optuna is required for optimization")
-
     def objective(trial):
         alpha = trial.suggest_float("alpha", *alpha_range, log=True)
         model = Lasso(alpha=alpha, max_iter=10000)
         scores = cross_val_score(model, X, y, cv=cv, scoring="neg_root_mean_squared_error")
         return -scores.mean()
 
-    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-
-    return study.best_params, study.best_value
+    return _run_optuna_study(objective, n_trials)
 
 
 def optimize_elastic_net(
@@ -116,9 +94,6 @@ def optimize_elastic_net(
     n_trials: int = 100
 ) -> Tuple[Dict[str, Any], float]:
     """Optimize ElasticNet using Optuna."""
-    if not OPTUNA_AVAILABLE:
-        raise ImportError("Optuna is required for optimization")
-
     def objective(trial):
         alpha = trial.suggest_float("alpha", 1e-6, 1e2, log=True)
         l1_ratio = trial.suggest_float("l1_ratio", 0.0, 1.0)
@@ -126,10 +101,7 @@ def optimize_elastic_net(
         scores = cross_val_score(model, X, y, cv=cv, scoring="neg_root_mean_squared_error")
         return -scores.mean()
 
-    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-
-    return study.best_params, study.best_value
+    return _run_optuna_study(objective, n_trials)
 
 
 def optimize_rf(
@@ -139,9 +111,6 @@ def optimize_rf(
     n_trials: int = 50
 ) -> Tuple[Dict[str, Any], float]:
     """Optimize Random Forest using Optuna."""
-    if not OPTUNA_AVAILABLE:
-        raise ImportError("Optuna is required for optimization")
-
     def objective(trial):
         params = {
             "n_estimators": trial.suggest_int("n_estimators", 50, 300),
@@ -156,10 +125,7 @@ def optimize_rf(
         scores = cross_val_score(model, X, y, cv=cv, scoring="neg_root_mean_squared_error")
         return -scores.mean()
 
-    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-
-    return study.best_params, study.best_value
+    return _run_optuna_study(objective, n_trials)
 
 
 def grid_search_model(
@@ -169,18 +135,7 @@ def grid_search_model(
     y: np.ndarray,
     cv: int = 5
 ) -> Tuple[Any, Dict[str, Any], float]:
-    """Grid search for hyperparameter optimization.
-
-    Args:
-        model: Base model
-        param_grid: Parameter grid
-        X: Feature matrix
-        y: Target matrix
-        cv: Number of CV folds
-
-    Returns:
-        Tuple of (best_estimator, best_params, best_score)
-    """
+    """Grid search for hyperparameter optimization."""
     gs = GridSearchCV(
         model,
         param_grid,
@@ -218,32 +173,15 @@ def optimize_with_pca(
     cv: int = 5,
     n_trials: int = 100,
 ) -> Tuple[Dict[str, Any], float]:
-    """Jointly optimize PCA n_components and model hyperparameters.
-
-    Args:
-        X_raw: Raw/preprocessed spectra (before PCA)
-        y: Target matrix
-        model_name: Model to optimize ("ridge", "lasso", "pls", "rf")
-        n_components_range: Range for PCA n_components search
-        cv: Number of CV folds
-        n_trials: Number of optimization trials
-
-    Returns:
-        Tuple of (best_params including n_components, best_score)
-    """
-    if not OPTUNA_AVAILABLE:
-        raise ImportError("Optuna is required for optimization")
-
+    """Jointly optimize PCA n_components and model hyperparameters."""
     from sklearn.decomposition import PCA
     from sklearn.pipeline import Pipeline
 
     def objective(trial):
-        # Suggest n_components within range, but cap at max features
         max_components = min(n_components_range[1], X_raw.shape[1], X_raw.shape[0] - 1)
         min_components = min(n_components_range[0], max_components)
         n_components = trial.suggest_int("n_components", min_components, max_components)
 
-        # Model-specific hyperparameters
         if model_name == "ridge":
             alpha = trial.suggest_float("alpha", 1e-4, 1e4, log=True)
             model = Ridge(alpha=alpha)
@@ -269,7 +207,6 @@ def optimize_with_pca(
         else:
             raise ValueError(f"Unknown model: {model_name}")
 
-        # Create pipeline with PCA + model
         pipeline = Pipeline([
             ("pca", PCA(n_components=n_components)),
             ("model", model),
@@ -278,9 +215,4 @@ def optimize_with_pca(
         scores = cross_val_score(pipeline, X_raw, y, cv=cv, scoring="neg_root_mean_squared_error")
         return -scores.mean()
 
-    study = optuna.create_study(direction="minimize", sampler=TPESampler(seed=42))
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-
-    return study.best_params, study.best_value
+    return _run_optuna_study(objective, n_trials)
