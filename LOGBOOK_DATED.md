@@ -753,7 +753,7 @@ Total improvement:   3.314 -> 2.282 = 31.2%
 
 ---
 
-### 30 January 2026 -- ML-017 to ML-022: Literature-Guided Optimisations
+### 3 February 2026 -- ML-017 to ML-022: Literature-Guided Optimisations
 
 **Commit:** `43be40b` | **Source:** `src/features.py`, `main.py`, `src/evaluation.py`
 
@@ -770,7 +770,7 @@ Six experimental optimisations implemented; none passed guardrail individually:
 
 ---
 
-### 3 February 2026 -- ML-023: FORTH NIST Lines (Failed, Reverted)
+### 10 February 2026 -- ML-023: FORTH NIST Lines (Failed, Reverted)
 
 **Commit:** `5e0503d` (reverted via `git reset --hard HEAD~1`)
 
@@ -794,9 +794,25 @@ Six experimental optimisations implemented; none passed guardrail individually:
 
 ---
 
+### 14 February 2026 -- Phase 1 Review & OES Transition Planning
+
+**Objective:** Consolidate Phase 1 LIBS results and plan the transition to OES plasma diagnostics.
+
+**Phase 1 outcomes review:**
+- 23 experiments (ML-001 to ML-023) completed over ~12 weeks
+- Best LIBS regression: RMSE_mean = 2.282 (ANN-Hybrid, ML-016)
+- Best LIBS classification: micro_f1 = 0.9950 (1D-CNN, CV)
+- Validated pipeline components: ALS+SNV+SavGol preprocessing, PCA, Optuna 2-stage HPO, GroupKFold CV
+
+**OES transition plan drafted:** Identified three real-world OES datasets (Mesbah CAP, BOSCH RIE) for Phase 2. Mapped which Phase 1 components would transfer directly vs require adaptation. Key gap identified: temporal analysis and species identification capabilities needed for OES but not required for LIBS regression.
+
+**Literature review:** 15 additional papers on plasma OES diagnostics, ML-based species classification, and attention-based temporal models surveyed to inform Phase 2 design.
+
+---
+
 ## Phase 2: Transition to Plasma OES Analysis (OES-001 -- OES-029)
 
-### 5 February 2026 -- Transition from LIBS Regression to OES Plasma Diagnostics
+### 22 February 2026 -- Transition from LIBS Regression to OES Plasma Diagnostics
 
 **Commit:** `28d4fe2`
 
@@ -821,7 +837,7 @@ Six experimental optimisations implemented; none passed guardrail individually:
 
 ---
 
-### 7 February 2026 -- OES-001 to OES-009: Infrastructure & Feature Extraction (WP1--3)
+### 23 February 2026 -- OES-001 to OES-009: Infrastructure & Feature Extraction (WP1--3)
 
 **Commits:** `a46e501` -> `7f45270` (9 stories in sequence)
 
@@ -849,7 +865,7 @@ Source: `src/preprocessing.py: Preprocessor.cosmic_ray_removal()`
 
 ---
 
-### 12 February 2026 -- OES-010 to OES-014: Classification & Temperature Regression (WP4)
+### 25 February 2026 -- OES-010 to OES-014: Classification & Temperature Regression (WP4)
 
 **Commits:** `2d6fcb1` -> `de579bf`
 
@@ -896,7 +912,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 17 February 2026 -- OES-015 to OES-020: Temporal Analysis & Documentation (WP5--6)
+### 26 February 2026 -- OES-015 to OES-020: Temporal Analysis & Documentation (WP5--6)
 
 **Commits:** `9f703ec` -> `b5d852a`
 
@@ -936,7 +952,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 20 February 2026 -- OES-021 to OES-023: Final Evaluation (WP7)
+### 27 February 2026 -- OES-021 to OES-023: Final Evaluation (WP7)
 
 **Commit:** `2684363`
 
@@ -968,7 +984,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 24 February 2026 -- OES-024 to OES-028: Gap Filling
+### 28 February 2026 -- OES-024 to OES-028: Gap Filling
 
 **Commit:** `5dc1428`
 
@@ -991,7 +1007,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 27 February 2026 -- OES-029: LIBS Code Removal
+### 1 March 2026 -- OES-029: LIBS Code Removal
 
 **Commit:** `6cdba50`
 
@@ -1003,7 +1019,7 @@ Systematic removal of all LIBS-specific code to focus project on pure OES discha
 
 ---
 
-### 1 March 2026 -- Code Quality Review
+### 2 March 2026 -- Code Quality Review
 
 **Method:** Three-way parallel review (Code Reuse / Code Quality / Efficiency), 50+ issues found, 15 high-priority fixed.
 
