@@ -10,8 +10,6 @@ Usage:
 
 import argparse
 import csv
-import json
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -25,13 +23,7 @@ from src.data_loader import load_mesbah_cap
 from src.features import PlasmaDescriptorExtractor
 
 
-def get_git_sha() -> str:
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=str(ROOT), text=True
-        ).strip()
-    except Exception:
-        return "unknown"
+from src.utils import get_git_sha
 
 
 def build_features(X, wl, variant: str, fitted=None):
