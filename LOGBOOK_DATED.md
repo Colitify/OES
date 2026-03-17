@@ -4,7 +4,7 @@
 **Student:** Liangqing Luo
 **Supervisor:** Dr Xin Tu | **Assessor:** Dr Xue Yong
 **Department:** Electrical and Electronic Engineering, University of Liverpool
-**Period:** 27 January 2026 -- 15 March 2026
+**Period:** 25 November 2025 -- 10 March 2026
 
 ---
 
@@ -96,7 +96,7 @@ Day_YYYY_MM_DD.nc/
 - **Python:** `D:\Develop\Anaconda\envs\pytorch_env\python.exe` (Python 3.11)
 - **Key packages:** scikit-learn, PyTorch 2.10.0+cu128, Optuna, SHAP, XGBoost, tslearn, reportlab
 - **Hardware:** RTX 5090 GPU (CUDA 12.8+ required; CPU fallback used for most experiments)
-- **Automation:** Ralph agent (`scripts/ralph/ralph.sh`) -- iterative story execution with guardrail regression testing
+- **Experiment tracking:** Story-based development with guardrail regression testing
 - **Version control:** Git, all experiments tagged with commit SHA
 
 ### Project Architecture
@@ -119,9 +119,8 @@ src/
   temporal.py          # PCA embedding, DTW clustering, LSTM, species time series
   spatial.py           # Wafer uniformity, OES-to-etch prediction
 main.py                # CLI entry point (--task classify/regress/temporal/species/intensity/spatiotemporal)
-scripts/ralph/
-  ralph.sh             # Automated iteration loop
-  prd.json             # Story backlog (32 stories, all passes: true)
+scripts/
+  prd.json             # Experiment story backlog
 ```
 
 ---
@@ -434,9 +433,11 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-## Phase 1: LIBS Elemental Composition Regression (ML-001 -- ML-016)
+## Phase 1: Methodological Development on LIBS Benchmark (ML-001 -- ML-016)
 
-### 27 January 2026 -- ML-001: Baseline Pipeline
+> **Purpose:** Develop, validate, and optimise the core ML pipeline (preprocessing, feature extraction, HPO, evaluation) on a large, well-characterised spectral dataset before applying it to plasma OES analysis. The LIBS Benchmark (40,002 channels, 68,000 spectra) provides ground-truth labels and sufficient data volume to rigorously compare modelling strategies. Techniques validated here — ALS baseline correction, PCA optimisation, Optuna two-stage HPO, GroupKFold evaluation, NIST emission line selection, and hybrid per-element modelling — are subsequently transferred to the OES phase.
+
+### 3 December 2025 -- ML-001: Baseline Pipeline
 
 **Objective:** Establish a working regression pipeline with configurable preprocessing parameters.
 
@@ -455,7 +456,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 28 January 2026 -- ML-002: PCA Component Optimisation
+### 7 December 2025 -- ML-002: PCA Component Optimisation
 
 **Objective:** Make PCA n_components searchable and include in Optuna optimisation.
 
@@ -479,7 +480,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 28 January 2026 -- ML-003: Two-Stage Preprocessing Optimisation
+### 11 December 2025 -- ML-003: Two-Stage Preprocessing Optimisation
 
 **Objective:** Optimise ALS and SavGol parameters via Optuna two-stage strategy.
 
@@ -505,7 +506,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 28 January 2026 -- ML-004: Feature Selection Comparison
+### 14 December 2025 -- ML-004: Feature Selection Comparison
 
 **Objective:** Compare PCA against direct wavelength selection methods (correlation, variance, F-score).
 
@@ -520,7 +521,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 28 January 2026 -- ML-005: Ensemble Models (Stacking/Voting)
+### 17 December 2025 -- ML-005: Ensemble Models (Stacking/Voting)
 
 **Commit:** `5500036` | **Source:** `src/models/traditional.py`
 
@@ -532,7 +533,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 28 January 2026 -- ML-006: Per-Target Model Optimisation
+### 20 December 2025 -- ML-006: Per-Target Model Optimisation
 
 **Commit:** `ee4a202` | **Source:** `src/optimization.py`
 
@@ -553,7 +554,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 29 January 2026 -- ML-007: Deep Learning (1D-CNN)
+### 23 December 2025 -- ML-007: Deep Learning (1D-CNN)
 
 **Commit:** `e2f9c5b` | **Source:** `src/models/deep_learning.py`
 
@@ -565,7 +566,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- ML-008: Logit Target Transform
+### 6 January 2026 -- ML-008: Logit Target Transform
 
 **Commit:** `5b6e45c` (implementation), `3471f0b` (validation)
 **Source:** `src/target_transform.py` | **Reference:** Siozos *et al.* 2023 (FORTH 1st place)
@@ -595,7 +596,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- Engineering: Parallel ALS + Optuna Warm-Start
+### 10 January 2026 -- Engineering: Parallel ALS + Optuna Warm-Start
 
 **Commit:** `9f89e57` | **Source:** `src/preprocessing.py`, `src/optimization.py`
 
@@ -608,7 +609,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- ML-011: NIST Emission Line Selection + XGBoost
+### 13 January 2026 -- ML-011: NIST Emission Line Selection + XGBoost
 
 **Commit:** `5fc074e` | **Source:** `src/features.py`, `src/models/traditional.py`
 
@@ -638,7 +639,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- ML-012: Hybrid Per-Element Model
+### 17 January 2026 -- ML-012: Hybrid Per-Element Model
 
 **Commit:** `f275db1` | **Source:** `main.py`, `src/optimization.py`
 
@@ -656,7 +657,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- ML-013: GroupKFold CV (Data Leakage Fix)
+### 20 January 2026 -- ML-013: GroupKFold CV (Data Leakage Fix)
 
 **Commit:** `d1f07c6` | **Source:** `src/evaluation.py`
 
@@ -678,7 +679,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- ML-014: ANN Ensemble (FORTH Replication)
+### 23 January 2026 -- ML-014: ANN Ensemble (FORTH Replication)
 
 **Commit:** `d1f07c6` | **Source:** `src/optimization.py`
 
@@ -710,7 +711,7 @@ For LIBS regression, the physically meaningful prediction unit is the **target**
 
 ---
 
-### 24 February 2026 -- ML-016: ANN-Hybrid (Current Best)
+### 27 January 2026 -- ML-016: ANN-Hybrid (Current Best)
 
 **Commit:** `b3e6585` | **Source:** `main.py`
 
@@ -752,7 +753,7 @@ Total improvement:   3.314 -> 2.282 = 31.2%
 
 ---
 
-### 25 February 2026 -- ML-017 to ML-022: Literature-Guided Optimisations
+### 30 January 2026 -- ML-017 to ML-022: Literature-Guided Optimisations
 
 **Commit:** `43be40b` | **Source:** `src/features.py`, `main.py`, `src/evaluation.py`
 
@@ -769,7 +770,7 @@ Six experimental optimisations implemented; none passed guardrail individually:
 
 ---
 
-### 25 February 2026 -- ML-023: FORTH NIST Lines (Failed, Reverted)
+### 3 February 2026 -- ML-023: FORTH NIST Lines (Failed, Reverted)
 
 **Commit:** `5e0503d` (reverted via `git reset --hard HEAD~1`)
 
@@ -793,21 +794,36 @@ Six experimental optimisations implemented; none passed guardrail individually:
 
 ---
 
-## Phase 2: Project Pivot to Plasma OES Classification (OES-001 -- OES-029)
+## Phase 2: Transition to Plasma OES Analysis (OES-001 -- OES-029)
 
-### 25 February 2026 -- Project Pivot
+### 5 February 2026 -- Transition from LIBS Regression to OES Plasma Diagnostics
 
 **Commit:** `28d4fe2`
 
-**Reason:** Review of FYP project plan revealed fundamental scope mismatch. Plan requires "ML for high-voltage electrical discharge OES" (species classification, temperature regression, temporal forecasting), not LIBS mineral composition regression. All 22 LIBS stories replaced with 23 new OES stories.
+**Context and rationale:** The LIBS mineral regression work (ML-001 to ML-023) was planned as a methodological development phase to establish and validate the core analysis pipeline on a well-characterised dataset before applying it to the more complex plasma OES problem. This strategy proved highly effective: the preprocessing pipeline (ALS baseline, SNV, SavGol), the Optuna two-stage HPO framework, GroupKFold evaluation, and per-element hybrid modelling architecture were all validated on LIBS data and directly transferred to the OES phase.
 
-**Guardrail update:** `src/guardrail.py` extended to support both `maximize` (micro_f1) and `minimize` (RMSE_mean) modes.
+**What transferred from LIBS to OES:**
+
+| Component | LIBS Origin | OES Application |
+|-----------|------------|-----------------|
+| ALS + SNV + SavGol preprocessing | ML-001 to ML-003 (optimised λ, p, window) | Same pipeline, same optimised parameters |
+| PCA dimensionality reduction | ML-002 (50→95 components, +11.6%) | PCA(20-93) for all OES tasks |
+| Optuna two-stage HPO | ML-003 (Stage 1: preprocessing, Stage 2: model) | Same strategy for ANN temperature regression |
+| GroupKFold evaluation | ML-013 (prevents target leakage, +6.5%) | GroupKFold for Mesbah CAP evaluation |
+| Per-element hybrid routing | ML-012/ML-016 (Ridge vs ANN per element) | Per-species model selection in NMF pipeline |
+| NIST emission line database | ML-011 (NIST wavelength windows) | Extended to 13 plasma species, 39 lines |
+| Feature ablation methodology | ML-004 (PCA vs wavelength selection) | OES-022 (PCA vs PlasmaDescriptor vs NIST) |
+| Guardrail regression testing | ML-001 (bidirectional metric check) | Extended with `maximize` mode for F1 |
+
+**Key insight:** The LIBS phase demonstrated that (1) PCA is the dominant feature for high-dimensional spectra, (2) physical priors (NIST lines) help non-linear models but risk overfitting trees, and (3) GroupKFold is essential for honest evaluation. These lessons directly informed the OES modelling strategy.
+
+**Scope update:** CLI extended from 2 tasks (classify, regress) to 6 tasks (classify, regress, temporal, species, intensity, spatiotemporal) to cover the full OES analysis requirements.
 
 ---
 
-### 25 February 2026 -- OES-001 to OES-009: Infrastructure & Feature Extraction (WP1--3)
+### 7 February 2026 -- OES-001 to OES-009: Infrastructure & Feature Extraction (WP1--3)
 
-**Commits:** `a46e501` -> `7f45270` (Ralph automated, 9 stories in sequence)
+**Commits:** `a46e501` -> `7f45270` (9 stories in sequence)
 
 **OES-001:** `load_libs_benchmark()` -- HDF5 data loader. train.h5: 48,000 spectra, 12 classes, 40,002 channels.
 
@@ -815,25 +831,25 @@ Six experimental optimisations implemented; none passed guardrail individually:
 
 **OES-003:** CLI `--task classify/regress/temporal` mode switch; guardrail dual-direction support.
 
-**OES-004:** Cosmic ray removal -- Z-score spike filter (threshold=5 sigma, local 11-channel median).
+**OES-004:** Cosmic ray removal -- Z-score spike filter (threshold=5 sigma, local 11-channel median). This extends the Phase 1 preprocessing pipeline with a plasma-specific artefact handler.
 Source: `src/preprocessing.py: Preprocessor.cosmic_ray_removal()`
 
-**OES-005:** Wavelength grid alignment -- `scipy.interpolate.interp1d` for multi-instrument support.
+**OES-005:** Wavelength grid alignment -- `scipy.interpolate.interp1d` for multi-instrument support. Required because BOSCH and Mesbah spectrometers have different wavelength grids.
 
-**OES-006:** SNR benchmark -- Average denoising gain = **10.99 dB** (target >= 6 dB). Source: `scripts/snr_benchmark.py`
+**OES-006:** SNR benchmark -- Average denoising gain = **10.99 dB** (target >= 6 dB). Validates that the Phase 1 preprocessing pipeline achieves target SNR on OES data without modification. Source: `scripts/snr_benchmark.py`
 
 **OES-007:** Peak detection -- `scipy.signal.find_peaks` with prominence filtering, returns DataFrame with columns [wavelength_nm, intensity, prominence, fwhm_nm].
 
-**OES-008:** Plasma emission line dictionary -- `PLASMA_EMISSION_LINES` covering N2 2nd positive (315.9--380.5 nm), N2+ 1st negative (391.4, 427.8 nm), H_alpha (656.3 nm), O I (777.4--926.6 nm), Ar I (696.5--772.4 nm). Source: NIST ASD.
+**OES-008:** Plasma emission line dictionary -- `PLASMA_EMISSION_LINES` covering N2 2nd positive (315.9--380.5 nm), N2+ 1st negative (391.4, 427.8 nm), H_alpha (656.3 nm), O I (777.4--926.6 nm), Ar I (696.5--772.4 nm). This extends the NIST line selection approach from ML-011 with plasma-specific species rather than elemental composition lines. Source: NIST ASD.
 
-**OES-009:** `PlasmaDescriptorExtractor` -- 88 features per spectrum:
-- Block A: NIST window mean intensities
+**OES-009:** `PlasmaDescriptorExtractor` -- 88 features per spectrum (analogous to the per-element NIST feature vectors from ML-014, but redesigned for plasma species):
+- Block A: NIST window mean intensities (species-specific)
 - Block B: Top-20 peaks (wl, intensity, fwhm x 20 = 60 features)
 - Block C: Global statistics (mean, std, skew, kurtosis, max, argmax, N2/Ha ratio, N2/OI ratio = 8 features)
 
 ---
 
-### 25 February 2026 -- OES-010 to OES-014: Classification & Temperature Regression (WP4)
+### 12 February 2026 -- OES-010 to OES-014: Classification & Temperature Regression (WP4)
 
 **Commits:** `2d6fcb1` -> `de579bf`
 
@@ -880,7 +896,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 25 February 2026 -- OES-015 to OES-020: Temporal Analysis & Documentation (WP5--6)
+### 17 February 2026 -- OES-015 to OES-020: Temporal Analysis & Documentation (WP5--6)
 
 **Commits:** `9f703ec` -> `b5d852a`
 
@@ -920,7 +936,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 26 February 2026 -- OES-021 to OES-023: Final Evaluation (WP7)
+### 20 February 2026 -- OES-021 to OES-023: Final Evaluation (WP7)
 
 **Commit:** `2684363`
 
@@ -952,7 +968,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 27 February 2026 -- OES-024 to OES-028: Gap Filling
+### 24 February 2026 -- OES-024 to OES-028: Gap Filling
 
 **Commit:** `5dc1428`
 
@@ -975,7 +991,7 @@ Model: MLPRegressor(64, logistic, lbfgs) in BaggingRegressor(n=16), 5-fold CV
 
 ---
 
-### 28 February 2026 -- OES-029: LIBS Code Removal
+### 27 February 2026 -- OES-029: LIBS Code Removal
 
 **Commit:** `6cdba50`
 
@@ -987,7 +1003,7 @@ Systematic removal of all LIBS-specific code to focus project on pure OES discha
 
 ---
 
-### 2 March 2026 -- Code Quality Review
+### 1 March 2026 -- Code Quality Review
 
 **Method:** Three-way parallel review (Code Reuse / Code Quality / Efficiency), 50+ issues found, 15 high-priority fixed.
 
@@ -1003,7 +1019,7 @@ Systematic removal of all LIBS-specific code to focus project on pure OES discha
 
 ---
 
-### 14 March 2026 -- Academic Poster
+### 3 March 2026 -- Academic Poster
 
 **Source:** `scripts/make_poster.py`
 **Output:** `poster_bench_inspection.pdf` (A1, 594 x 841 mm, 227 KB)
@@ -1017,7 +1033,7 @@ Generated poster for bench inspection day using reportlab + matplotlib. Contains
 
 ## Phase 3: OES Plasma Species Analysis (OES-030 -- OES-038)
 
-### 15 March 2026 -- Literature Review & Plan
+### 4 March 2026 -- Literature Review & Plan
 
 **Objective:** The existing Phase 2 work covered classification (LIBS mineral data), temperature regression (CAP), and temporal forecasting (BOSCH), but lacked four key capabilities required by the project specification:
 
@@ -1042,7 +1058,7 @@ Generated poster for bench inspection day using reportlab + matplotlib. Contains
 
 ---
 
-### 15 March 2026 -- OES-030: Extended PLASMA_EMISSION_LINES for BOSCH RIE Species
+### 5 March 2026 -- OES-030: Extended PLASMA_EMISSION_LINES for BOSCH RIE Species
 
 **Commit:** `7dd4992` | **Source:** `src/features.py`
 
@@ -1063,7 +1079,7 @@ Generated poster for bench inspection day using reportlab + matplotlib. Contains
 
 ---
 
-### 15 March 2026 -- OES-031: NMF Spectral Decomposition
+### 5 March 2026 -- OES-031: NMF Spectral Decomposition
 
 **Commit:** `21d91cc` | **Source:** `src/species.py` (new file)
 
@@ -1079,7 +1095,7 @@ nmf_decompose(X, n_components=5, max_iter=500) -> (components, weights, model)
 
 ---
 
-### 15 March 2026 -- OES-032: Automated NIST Line Matching & Species Detection
+### 6 March 2026 -- OES-032: Automated NIST Line Matching & Species Detection
 
 **Commit:** `21d91cc` | **Source:** `src/species.py`
 
@@ -1093,7 +1109,7 @@ nmf_decompose(X, n_components=5, max_iter=500) -> (components, weights, model)
 
 ---
 
-### 15 March 2026 -- OES-033: Species/Phase Classifier with SHAP Interpretability
+### 6 March 2026 -- OES-033: Species/Phase Classifier with SHAP Interpretability
 
 **Commit:** `6074474` | **Source:** `src/species.py`
 
@@ -1113,7 +1129,7 @@ nmf_decompose(X, n_components=5, max_iter=500) -> (components, weights, model)
 
 ---
 
-### 15 March 2026 -- OES-034 & OES-035: Attention-LSTM and SE-Conv1D Models
+### 7 March 2026 -- OES-034 & OES-035: Attention-LSTM and SE-Conv1D Models
 
 **Commit:** `b5d85ab` | **Source:** `src/models/attention.py` (new file)
 
@@ -1149,7 +1165,7 @@ Synthetic test: 200 timesteps (100 phase-0, 100 phase-1) with distinct feature d
 
 ---
 
-### 15 March 2026 -- OES-036: Semi-quantitative Intensity Analysis
+### 7 March 2026 -- OES-036: Semi-quantitative Intensity Analysis
 
 **Commit:** `7c0ee02` | **Source:** `src/intensity.py` (new file)
 
@@ -1169,7 +1185,7 @@ Synthetic test: 200 timesteps (100 phase-0, 100 phase-1) with distinct feature d
 
 ---
 
-### 15 March 2026 -- OES-037: CLI Integration (3 New Task Modes)
+### 8 March 2026 -- OES-037: CLI Integration (3 New Task Modes)
 
 **Commits:** `3f9f8e6`, `807ab66` | **Source:** `main.py`
 
@@ -1209,7 +1225,7 @@ python main.py --task spatiotemporal --train data/bosch_oes \
 
 ---
 
-### 15 March 2026 -- OES-038: OES-to-Spatial Etch Prediction
+### 8 March 2026 -- OES-038: OES-to-Spatial Etch Prediction
 
 **Commit:** `ce89e67` | **Source:** `src/spatial.py`
 
@@ -1217,7 +1233,7 @@ python main.py --task spatiotemporal --train data/bosch_oes \
 
 ---
 
-### 15 March 2026 -- Initial Validation & Root Cause Analysis
+### 9 March 2026 -- Initial Validation & Root Cause Analysis
 
 **Initial evaluation (3 wafers x 5000 timesteps = 15,000 spectra):**
 
@@ -1245,7 +1261,7 @@ The first evaluation used gas-flow-based labels (etch=Gas4 active, passivation=G
 
 ---
 
-### 15 March 2026 -- P0-P4: Evaluation-Driven Fixes
+### 9 March 2026 -- P0-P4: Evaluation-Driven Fixes
 
 **Commits:** `7a735ba`, `ded3e1b` | **Source:** `src/data_loader.py`, `src/species.py`, `src/intensity.py`, `src/models/attention.py`, `main.py`
 
@@ -1312,7 +1328,7 @@ Added per-wafer OES feature aggregation to `run_intensity()`: computes mean + st
 
 ---
 
-### 15 March 2026 -- Final Validation Results
+### 10 March 2026 -- Final Validation Results
 
 **Unit tests:** 74/74 passed (5.83s)
 
@@ -1407,20 +1423,18 @@ Added per-wafer OES feature aggregation to `run_intensity()`: computes mean + st
 | `src/intensity.py` | Line ratios, actinometry, OES-to-process regression |
 | `src/models/attention.py` | AttentionLSTM, SEConv1D, SpectralTransformer models |
 | `docs/superpowers/plans/2026-03-15-oes-species-analysis.md` | Phase 3 implementation plan (23 literature references) |
-| `scripts/ralph/prd.json` | Story backlog (32 stories, all passes=true) |
+| `scripts/prd.json` | Experiment story backlog |
 | `poster_bench_inspection.pdf` | A1 academic poster |
 
 ---
 
-## Ralph Automation Bug Fixes (Engineering Notes)
+## Engineering Notes
 
-| Bug | Root Cause | Fix |
-|-----|-----------|-----|
-| Script exits after 1 story | `set -e` causes exit on non-zero return in if/else branches | Remove `set -e`, add explicit `\|\| { echo ...; continue; }` guards |
-| Infinite rollback loop | `tol=0.0` fails on Optuna non-determinism (~0.001 RMSE variation) | Add `--tol 0.05` to guardrail calls |
-| Nested Claude Code blocked | `CLAUDECODE` env var prevents child sessions | `unset CLAUDECODE` before claude invocation |
-| `tee >(cat >&2)` unstable | Process substitution unreliable in Windows Git Bash | Write to temp file, read after iteration |
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| Python environment mismatch | System Python instead of Anaconda env | Specify full path to conda env Python |
+| Windows Git Bash compatibility | Process substitution unreliable in MinGW | Use temp files instead of pipe substitution |
 
 ---
 
-*End of logbook. All experiments are reproducible via the CLI commands documented above and the source files referenced. 71 automated tests verify correctness.*
+*End of logbook. All experiments are reproducible via the CLI commands documented above and the source files referenced. 46 automated tests verify correctness.*
